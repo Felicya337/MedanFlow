@@ -5,57 +5,74 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Trip;
 use App\Models\TripLocation;
+use App\Models\Driver;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class TripController extends Controller
 {
-    /**
-     * Memulai perjalanan (Driver)
-     */
     public function startTrip(Request $request)
     {
-        $trip = Trip::create([
-            'driver_id' => $request->user()->id,
-            'angkot_id' => 1, // Simulasi angkot ID
-            'start_time' => now(),
-            'status' => 'ongoing',
-            'current_status' => 'green'
-        ]);
-        return response()->json($trip);
+        // 1. Ambil user yang sedang login
+        $user = $request->user();
+
+        // 2. Cari data driver yang terhubung dengan user ini
+        $driver = Driver::where('user_id', $user->id)->first();
+
+        // Jika user ini ternyata tidak punya profil di tabel 'drivers'
+        if (!$driver) {
+            return response()->json([
+                'message' => 'Profil Driver tidak ditemukan. Pastikan Anda sudah terdaftar sebagai Driver.'
+            ], 404);
+        }
+
+        // 3. Buat data Trip baru
+        try {
+            $trip = Trip::create([
+                'driver_id' => $driver->id,
+                'angkot_id' => $driver->angkot_id, // Ambil angkot yang biasa dia bawa
+                'start_time' => now(),
+                'status' => 'ongoing',
+                'current_status' => 'green',
+                'current_eta' => 0
+            ]);
+
+            return response()->json($trip);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Gagal membuat data perjalanan: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
-    /**
-     * Update lokasi berkala (Driver)
-     */
     public function updateLocation(Request $request, $id)
     {
+        $request->validate([
+            'latitude' => 'required',
+            'longitude' => 'required',
+            'speed' => 'nullable'
+        ]);
+
         TripLocation::create([
             'trip_id' => $id,
             'latitude' => $request->latitude,
             'longitude' => $request->longitude,
-            'speed' => $request->speed
+            'speed' => $request->speed ?? 0
         ]);
+
         return response()->json(['status' => 'success']);
     }
 
-    /**
-     * Mendapatkan semua angkot aktif untuk Penumpang (Guest)
-     */
     public function getActiveTrips()
     {
-        // Ambil perjalanan yang sedang berlangsung
         $trips = Trip::with(['angkot.route', 'driver.user'])
             ->where('status', 'ongoing')
             ->get();
 
         $data = $trips->map(function ($trip) {
-            // Ambil lokasi terbaru angkot ini
             $latestLocation = TripLocation::where('trip_id', $trip->id)
                 ->latest()
                 ->first();
-
-            // Simulasi status kepadatan (Crowd Status)
-            $crowdLevels = ['Sepi', 'Normal', 'Penuh'];
 
             return [
                 'trip_id' => $trip->id,
@@ -65,9 +82,9 @@ class TripController extends Controller
                 'latitude' => $latestLocation ? $latestLocation->latitude : 3.5952,
                 'longitude' => $latestLocation ? $latestLocation->longitude : 98.6722,
                 'speed' => $latestLocation ? $latestLocation->speed : 0,
-                'eta_minutes' => rand(2, 15), // Simulasi ETA ke titik terdekat user
-                'crowd_status' => $crowdLevels[rand(0, 2)],
-                'congestion' => $trip->current_status, // green, yellow, red
+                'eta_minutes' => rand(2, 15),
+                'crowd_status' => 'Normal',
+                'congestion' => $trip->current_status,
             ];
         });
 

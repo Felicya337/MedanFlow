@@ -58,18 +58,18 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 1. Header Insight
-            const Row(
+            Row(
               children: [
-                Icon(Icons.auto_awesome, color: Colors.amber, size: 28),
-                SizedBox(width: 10),
+                const Icon(Icons.auto_awesome, color: Colors.amber, size: 28),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Smart Prediction", 
+                      const Text("Smart Prediction", 
                         style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                       Text("Data diproses berdasarkan trafik & cuaca terkini", 
-                        style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -124,7 +124,7 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
                   elevation: 0,
                 ),
                 child: _isLoading 
-                  ? const CircularProgressIndicator(color: Colors.white)
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Text("ANALISIS ESTIMASI SEKARANG", 
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
@@ -151,11 +151,11 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
   Widget _buildRouteInputVisual() {
     return Row(
       children: [
-        const Column(
+        Column(
           children: [
-            Icon(Icons.radio_button_checked, color: Colors.blue, size: 18),
-            Container(width: 2, height: 30, color: Colors.grey),
-            Icon(Icons.location_on, color: Colors.red, size: 18),
+            const Icon(Icons.radio_button_checked, color: Colors.blue, size: 18),
+            Container(width: 2, height: 30, color: Colors.grey.shade300),
+            const Icon(Icons.location_on, color: Colors.red, size: 18),
           ],
         ),
         const SizedBox(width: 15),
