@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\TripController;
 use App\Http\Controllers\Api\RecommendationController;
 use App\Http\Controllers\Api\TrafficMapController;
 use App\Http\Controllers\Api\PredictionController;
+use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\DriverManagementController;
 
 // Public Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -21,4 +23,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/trips/start', [TripController::class, 'startTrip']);
     Route::post('/trips/{id}/location', [TripController::class, 'updateLocation']);
     Route::get('/trips/active', [TripController::class, 'getActiveAngkots']);
+
+    Route::get('/admin/stats', [AdminController::class, 'getDashboardStats']);
+    Route::get('/admin/drivers', [DriverManagementController::class, 'index']);
+    Route::get('/admin/angkots', [DriverManagementController::class, 'getAngkots']);
+    Route::post('/admin/drivers', [DriverManagementController::class, 'store']);
+    Route::put('/admin/drivers/{id}', [DriverManagementController::class, 'update']);
+    Route::delete('/admin/drivers/{id}', [DriverManagementController::class, 'destroy']);
 });

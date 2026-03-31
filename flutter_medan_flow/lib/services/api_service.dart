@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  final String baseUrl = "http://172.17.65.115:8000/api"; // GANTI IP ANDA
+  final String baseUrl = "http://172.27.81.195:8000/api"; // GANTI IP ANDA
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     final response = await http.post(
@@ -25,20 +25,17 @@ class ApiService {
   Future<int> startTrip() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('token');
-    
+
     final response = await http.post(
       Uri.parse('$baseUrl/trips/start'),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Accept': 'application/json',
-      },
+      headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
     );
 
     if (response.statusCode == 200) {
       return jsonDecode(response.body)['id'];
     } else {
       // DEBUG: Cetak isi error dari server agar tahu penyebabnya
-      print("Server Error: ${response.body}"); 
+      print("Server Error: ${response.body}");
       throw Exception('Gagal memulai perjalanan: ${response.statusCode}');
     }
   }

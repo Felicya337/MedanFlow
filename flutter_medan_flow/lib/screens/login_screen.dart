@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import 'driver_home_screen.dart';
+import 'admin_dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -38,8 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Redirection Berdasarkan Role
       if (roleId == 1) {
-        // Logika Dashboard Admin/Pemerintah
-        _showSuccessSnackBar("Selamat Datang, Admin.");
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AdminDashboardScreen()));
       } else if (roleId == 2) {
         // Masuk ke Dashboard Driver
         Navigator.pushReplacement(
