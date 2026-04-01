@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter_medan_flow/services/api_service.dart';
 import 'login_screen.dart';
 import 'guest_home_screen.dart';
@@ -6,7 +8,7 @@ import 'route_recommendation_screen.dart';
 import 'travel_time_prediction_screen.dart';
 import 'traffic_heatmap_screen.dart';
 import 'angkot_tracking_screen.dart';
-import 'notification_screen.dart'; // Import Baru
+import 'notification_screen.dart';
 
 class LandingPage extends StatefulWidget {
   const LandingPage({super.key});
@@ -19,13 +21,19 @@ class _LandingPageState extends State<LandingPage> {
   int _unreadNotif = 0;
   bool _showCriticalBanner = false;
   String _bannerMessage = "";
+  
+  // State data cuaca
+  Map<String, dynamic>? _weatherData;
+  bool _isLoadingWeather = true;
 
   @override
   void initState() {
     super.initState();
     _checkNotifications();
+    _fetchWeather();
   }
 
+  // Fungsi mengambil notifikasi dari API
   Future<void> _checkNotifications() async {
     try {
       final data = await ApiService().getNotifications();
@@ -37,7 +45,23 @@ class _LandingPageState extends State<LandingPage> {
         }
       });
     } catch (e) {
-      debugPrint("Check Notif Failed");
+      debugPrint("Check Notif Failed: $e");
+    }
+  }
+
+  // Fungsi mengambil data cuaca dari WeatherController Laravel
+  Future<void> _fetchWeather() async {
+    try {
+      final response = await http.get(Uri.parse("${ApiService().baseUrl}/weather/current"));
+      if (response.statusCode == 200) {
+        setState(() {
+          _weatherData = jsonDecode(response.body);
+          _isLoadingWeather = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Fetch Weather Failed: $e");
+      setState(() => _isLoadingWeather = false);
     }
   }
 
@@ -51,9 +75,9 @@ class _LandingPageState extends State<LandingPage> {
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // APP BAR DENGAN NOTIFIKASI LONCENG
+          // 1. APP BAR DENGAN NOTIFIKASI LONCENG
           SliverAppBar(
-            expandedHeight: 180.0,
+            expandedHeight: 120.0,
             floating: false,
             pinned: true,
             elevation: 0,
@@ -107,23 +131,14 @@ class _LandingPageState extends State<LandingPage> {
                 horizontal: 20,
                 vertical: 16,
               ),
-              title: const Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Horas, Medan! 🌞",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  Text(
-                    "Mau ke mana hari ini?",
-                    style: TextStyle(fontSize: 10, color: Colors.white70),
-                  ),
-                ],
+              title: const Text(
+                "MEDAN FLOW",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                  color: Colors.white,
+                ),
               ),
               background: Container(color: primaryColor),
             ),
@@ -133,7 +148,7 @@ class _LandingPageState extends State<LandingPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // CRITICAL ALERT BANNER (Hanya muncul jika ada notif kritis)
+                // 2. CRITICAL ALERT BANNER
                 if (_showCriticalBanner)
                   Container(
                     width: double.infinity,
@@ -172,9 +187,12 @@ class _LandingPageState extends State<LandingPage> {
                     ),
                   ),
 
-                // QUICK ACTIONS
+                // 3. WEATHER HERO SECTION (FITUR BARU)
+                _buildWeatherCard(),
+
+                // 4. QUICK ACTIONS
                 Padding(
-                  padding: const EdgeInsets.all(20.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10),
                   child: Row(
                     children: [
                       _buildQuickAction(
@@ -196,9 +214,9 @@ class _LandingPageState extends State<LandingPage> {
                   ),
                 ),
 
-                // INFORMASI TRAFIK BANNER
+                // 5. INFORMASI TRAFIK BANNER
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -233,7 +251,7 @@ class _LandingPageState extends State<LandingPage> {
                   ),
                 ),
 
-                const SizedBox(height: 30),
+                const SizedBox(height: 20),
 
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 20),
@@ -272,7 +290,7 @@ class _LandingPageState extends State<LandingPage> {
 
                 const SizedBox(height: 40),
 
-                // LOGIN AREA
+                // 6. LOGIN AREA
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -319,6 +337,140 @@ class _LandingPageState extends State<LandingPage> {
           ),
         ],
       ),
+    );
+  }
+
+  // Widget Builder: Card Cuaca
+  Widget _buildWeatherCard() {
+    if (_isLoadingWeather) {
+      return const Padding(
+        padding: EdgeInsets.all(20.0),
+        child: Center(child: CircularProgressIndicator(color: Color(0xFF00796B))),
+      );
+    }
+
+    if (_weatherData == null) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF00897B), Color(0xFF004D40)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          )
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Kondisi Medan Saat Ini",
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    _weatherData!['condition'],
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    _weatherData!['location'],
+                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                ],
+              ),
+              Column(
+                children: [
+                  Icon(
+                    _weatherData!['icon'] == 'rainy' 
+                        ? Icons.cloudy_snowing 
+                        : (_weatherData!['icon'] == 'cloudy' ? Icons.cloud : Icons.wb_sunny),
+                    color: Colors.white,
+                    size: 44,
+                  ),
+                  Text(
+                    "${_weatherData!['temp']}",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              )
+            ],
+          ),
+          const SizedBox(height: 15),
+          const Divider(color: Colors.white24),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _weatherInfoTile(Icons.water_drop_outlined, "Lembab", _weatherData!['humidity']),
+              _weatherInfoTile(Icons.air, "Angin", _weatherData!['wind_speed']),
+            ],
+          ),
+          const SizedBox(height: 15),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Text(
+              _weatherData!['description'],
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _weatherInfoTile(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, color: Colors.white70, size: 16),
+        const SizedBox(width: 6),
+        Text(
+          "$label: ",
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
     );
   }
 

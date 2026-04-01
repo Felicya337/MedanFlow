@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\TrafficMapController;
 use App\Http\Controllers\Api\PredictionController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\DriverManagementController;
+use App\Http\Controllers\Api\WeatherController;
+use App\Http\Controllers\Api\DriverController;
 
 // Public Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -14,6 +16,9 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::get('/recommendations', [RecommendationController::class, 'getRecommendations']);
 Route::get('/predict-time', [PredictionController::class, 'getTravelTimePrediction']);
 Route::get('/traffic-heatmap', [TrafficMapController::class, 'getPredictiveHeatmap']);
+Route::get('/weather/current', [WeatherController::class, 'getCurrentWeather']);
+
+Route::get('/driver/insights', [DriverController::class, 'getDashboardInsights']);
 
 // Protected Routes
 Route::middleware('auth:sanctum')->group(function () {

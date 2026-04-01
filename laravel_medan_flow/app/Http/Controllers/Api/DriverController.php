@@ -3,42 +3,53 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\TrafficData;
-use App\Models\WeatherData;
+use App\Models\TripLocation;
 use Illuminate\Http\Request;
 
 class DriverController extends Controller
 {
     public function getDashboardInsights()
     {
-        $traffic = TrafficData::latest()->first();
-        $weather = WeatherData::latest()->first();
+        // 1. Panggil fungsi internal WeatherController yang mengembalikan ARRAY
+        $weatherData = app(WeatherController::class)->getWeatherData();
 
-        // Logika Sederhana AI Keputusan
-        $isGoodToWork = true;
-        $reason = "Kondisi Medan saat ini sangat baik untuk menarik.";
+        // 2. LOGIKA TRAFIK DINAMIS
+        // Menghitung rata-rata kecepatan angkot dalam 30 menit terakhir
+        $avgSpeed = TripLocation::where('created_at', '>=', now()->subMinutes(30))
+                                ->avg('speed') ?? 30;
 
-        if ($weather && str_contains(strtolower($weather->weather_condition), 'rain')) {
-            $reason = "Hujan terdeteksi. Harap waspada jalan licin dan potensi macet di pusat kota.";
+        $congestionLevel = 'low';
+        $trafficDesc = 'Lancar';
+
+        if ($avgSpeed < 15) {
+            $congestionLevel = 'high';
+            $trafficDesc = 'Macet Parah';
+        } elseif ($avgSpeed < 25) {
+            $congestionLevel = 'medium';
+            $trafficDesc = 'Padat Merayap';
         }
 
-        if ($traffic && $traffic->congestion_level == 'high') {
+        // 3. KEPUTUSAN AI
+        $isGoodToWork = true;
+        $recommendation = $weatherData['description']; // Ambil saran dari data cuaca
+
+        if ($congestionLevel == 'high') {
             $isGoodToWork = false;
-            $reason = "Trafik Medan sedang sangat padat (Macet Parah). Pertimbangkan untuk menunda perjalanan.";
+            $recommendation = "Trafik Medan sedang sangat padat. Pertimbangkan istirahat sejenak.";
         }
 
         return response()->json([
             'weather' => [
-                'temp' => $weather ? $weather->temperature . "°C" : "29°C",
-                'condition' => $weather ? $weather->weather_condition : "Cerah",
+                'temp' => $weatherData['temp'],
+                'condition' => $weatherData['condition'],
             ],
             'traffic' => [
-                'level' => $traffic ? $traffic->congestion_level : "low",
-                'description' => $traffic ? "Kepadatan: " . ucfirst($traffic->congestion_level) : "Lancar",
+                'level' => $congestionLevel,
+                'description' => "Trafik: $trafficDesc",
+                'avg_speed' => round($avgSpeed) . " km/h"
             ],
-            'demand' => rand(70, 95) . "%", // Simulasi permintaan penumpang
             'is_good_to_work' => $isGoodToWork,
-            'recommendation' => $reason
+            'recommendation' => $recommendation
         ]);
     }
 }
