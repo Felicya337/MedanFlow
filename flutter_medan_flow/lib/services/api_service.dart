@@ -71,4 +71,16 @@ class ApiService {
     if (response.statusCode == 200) return jsonDecode(response.body);
     throw Exception('Gagal mengambil notifikasi');
   }
+
+  Future<Map<String, dynamic>> registerDriver(Map<String, String> data) async {
+    final res = await http.post(Uri.parse('$baseUrl/register-driver'), body: data);
+    if (res.statusCode == 200) return jsonDecode(res.body);
+    throw Exception(jsonDecode(res.body)['message'] ?? 'Gagal Registrasi');
+  }
+
+  Future<Map<String, dynamic>> verifyOtp(String email, String code) async {
+    final res = await http.post(Uri.parse('$baseUrl/verify-otp'), body: {'email': email, 'code': code});
+    if (res.statusCode == 200) return jsonDecode(res.body);
+    throw Exception(jsonDecode(res.body)['message'] ?? 'OTP Salah');
+  }
 }

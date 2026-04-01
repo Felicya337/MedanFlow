@@ -19,6 +19,8 @@ Route::get('/traffic-heatmap', [TrafficMapController::class, 'getPredictiveHeatm
 Route::get('/weather/current', [WeatherController::class, 'getCurrentWeather']);
 
 Route::get('/driver/insights', [DriverController::class, 'getDashboardInsights']);
+Route::post('/register-driver', [AuthController::class, 'registerDriver']);
+Route::post('/verify-otp', [AuthController::class, 'verifyOtp']);
 
 // Protected Routes
 Route::middleware('auth:sanctum')->group(function () {
@@ -35,4 +37,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/admin/drivers', [DriverManagementController::class, 'store']);
     Route::put('/admin/drivers/{id}', [DriverManagementController::class, 'update']);
     Route::delete('/admin/drivers/{id}', [DriverManagementController::class, 'destroy']);
+    Route::get('/admin/pending-drivers', [AdminController::class, 'getPendingDrivers']);
+    Route::post('/admin/approve-driver/{id}', [AdminController::class, 'approveDriver']);
+    Route::post('/admin/reject-driver/{id}', [AdminController::class, 'rejectDriver']);
 });

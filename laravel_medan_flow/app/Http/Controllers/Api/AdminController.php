@@ -7,6 +7,7 @@ use App\Models\Angkot;
 use App\Models\Trip;
 use App\Models\TrafficData;
 use App\Models\User;
+use App\Models\Driver;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 
@@ -46,6 +47,42 @@ class AdminController extends Controller
                 ['id' => 1, 'loc' => 'Jl. Thamrin', 'status' => 'Macet Parah', 'time' => '10 mnt lalu'],
                 ['id' => 2, 'loc' => 'Simpang Pos', 'status' => 'Padat Merayap', 'time' => '15 mnt lalu'],
             ]
+        ]);
+    }
+
+    public function getPendingDrivers()
+    {
+        // Mengambil driver yang statusnya 'pending' beserta data User dan Angkot-nya
+        $pending = Driver::with(['user', 'angkot.route'])
+            ->where('status', 'pending')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($pending);
+    }
+
+    public function approveDriver(Request $request, $id)
+    {
+        $driver = Driver::findOrFail($id);
+
+        // Update status menjadi active
+        $driver->update(['status' => 'active']);
+
+        return response()->json([
+            'message' => 'Driver ' . $driver->user->name . ' telah disetujui dan sekarang dapat menarik angkot.'
+        ]);
+    }
+
+    public function rejectDriver(Request $request, $id)
+    {
+        $driver = Driver::findOrFail($id);
+        $userName = $driver->user->name;
+
+        // Menghapus data user otomatis menghapus driver karena cascade delete
+        $driver->user->delete();
+
+        return response()->json([
+            'message' => 'Pendaftaran Driver ' . $userName . ' telah ditolak dan dihapus.'
         ]);
     }
 }

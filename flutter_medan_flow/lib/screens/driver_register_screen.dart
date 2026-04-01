@@ -1,74 +1,67 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import 'driver_home_screen.dart';
-import 'admin_dashboard_screen.dart';
-import 'driver_register_screen.dart'; // Import halaman registrasi
+import 'otp_verification_screen.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+class DriverRegisterScreen extends StatefulWidget {
+  const DriverRegisterScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<DriverRegisterScreen> createState() => _DriverRegisterScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
+  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passController = TextEditingController();
-  final ApiService _apiService = ApiService();
+  final _plateController = TextEditingController();
   
   bool _isLoading = false;
   bool _obscureText = true;
 
-  // Warna Tema Konsisten
+  // Warna Tema Konsisten dengan Login
   final Color primaryColor = const Color(0xFF00796B);
   final Color accentColor = const Color(0xFF004D40);
 
-  void _login() async {
-    if (_emailController.text.isEmpty || _passController.text.isEmpty) {
-      _showErrorSnackBar("Harap isi email dan password Anda.");
+  void _handleRegister() async {
+    // Validasi Sederhana
+    if (_nameController.text.isEmpty || 
+        _emailController.text.isEmpty || 
+        _passController.text.isEmpty || 
+        _plateController.text.isEmpty) {
+      _showSnackBar("Harap lengkapi semua data pendaftaran.", Colors.orange);
       return;
     }
 
     setState(() => _isLoading = true);
     try {
-      final res = await _apiService.login(_emailController.text, _passController.text);
+      await ApiService().registerDriver({
+        'name': _nameController.text,
+        'email': _emailController.text,
+        'password': _passController.text,
+        'vehicle_plate': _plateController.text,
+        'angkot_id': "1", // Simulasi rute pertama
+      });
       
       if (!mounted) return;
-
-      int roleId = res['user']['role_id'];
-
-      if (roleId == 1) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AdminDashboardScreen()));
-      } else if (roleId == 2) {
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const DriverHomeScreen())
-        );
-      } else {
-        _showSuccessSnackBar("Login Berhasil.");
-      }
+      
+      Navigator.push(
+        context, 
+        MaterialPageRoute(
+          builder: (_) => OtpVerificationScreen(email: _emailController.text)
+        )
+      );
     } catch (e) {
-      _showErrorSnackBar("Gagal Masuk: Email atau password salah.");
+      _showSnackBar(e.toString(), Colors.redAccent);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showErrorSnackBar(String message) {
+  void _showSnackBar(String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: Colors.redAccent,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: primaryColor,
+        backgroundColor: color,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -81,6 +74,7 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SingleChildScrollView(
         child: Column(
           children: [
+            // 1. Header Eksklusif Pendaftaran
             _buildHeader(),
 
             Padding(
@@ -89,7 +83,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Selamat Datang Kembali",
+                    "Buat Akun Driver",
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -98,16 +92,25 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    "Silakan masuk sebagai Driver atau Administrator Pemerintah untuk melanjutkan.",
+                    "Bergabunglah bersama Medan Flow untuk membantu mobilitas warga Medan.",
                     style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                   ),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 30),
+
+                  // 2. Form Input Fields
+                  _buildTextField(
+                    controller: _nameController,
+                    label: "Nama Lengkap",
+                    icon: Icons.person_outline,
+                    hint: "Masukkan nama sesuai KTP",
+                  ),
+                  const SizedBox(height: 20),
 
                   _buildTextField(
                     controller: _emailController,
-                    label: "Email Address",
+                    label: "Email Aktif",
                     icon: Icons.email_outlined,
-                    hint: "contoh@mail.com",
+                    hint: "Untuk pengiriman kode OTP",
                   ),
                   const SizedBox(height: 20),
 
@@ -116,27 +119,28 @@ class _LoginScreenState extends State<LoginScreen> {
                     label: "Password",
                     icon: Icons.lock_outline,
                     isPassword: true,
-                    hint: "Masukkan password Anda",
+                    hint: "Minimal 8 karakter",
+                  ),
+                  const SizedBox(height: 20),
+
+                  _buildTextField(
+                    controller: _plateController,
+                    label: "Plat Kendaraan (BK)",
+                    icon: Icons.directions_bus_filled_outlined,
+                    hint: "Contoh: BK 1234 ABC",
                   ),
 
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () {},
-                      child: Text(
-                        "Lupa Password?",
-                        style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
+                  const SizedBox(height: 15),
+                  _buildStepInfo(), // Informasi Langkah Selanjutnya
+
                   const SizedBox(height: 30),
 
+                  // 3. Register Button
                   SizedBox(
                     width: double.infinity,
                     height: 55,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _login,
+                      onPressed: _isLoading ? null : _handleRegister,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryColor,
                         foregroundColor: Colors.white,
@@ -144,7 +148,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderRadius: BorderRadius.circular(15),
                         ),
                         elevation: 4,
-                        shadowColor: primaryColor.withOpacity(0.4),
                       ),
                       child: _isLoading
                           ? const SizedBox(
@@ -153,17 +156,23 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                             )
                           : const Text(
-                              "MASUK KE DASHBOARD",
+                              "DAFTAR SEKARANG",
                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                             ),
                     ),
                   ),
 
+                  const SizedBox(height: 20),
+                  Center(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(
+                        "Sudah punya akun? Login di sini",
+                        style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 40),
-                  
-                  // FOOTER: AREA PENDAFTARAN & INFO
-                  _buildFooterSection(),
-                  const SizedBox(height: 30),
                 ],
               ),
             ),
@@ -176,7 +185,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildHeader() {
     return Container(
       width: double.infinity,
-      height: MediaQuery.of(context).size.height * 0.32,
+      height: MediaQuery.of(context).size.height * 0.28,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [accentColor, primaryColor],
@@ -187,70 +196,60 @@ class _LoginScreenState extends State<LoginScreen> {
           bottomLeft: Radius.circular(60),
         ),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Stack(
         children: [
-          const Icon(Icons.directions_bus_filled, size: 80, color: Colors.white),
-          const SizedBox(height: 15),
-          const Text(
-            "MEDAN FLOW",
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 3,
+          Positioned(
+            top: 50,
+            left: 20,
+            child: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () => Navigator.pop(context),
             ),
           ),
-          Text(
-            "Driver & Admin Portal",
-            style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 20),
+                const Icon(Icons.app_registration_rounded, size: 60, color: Colors.white),
+                const SizedBox(height: 10),
+                const Text(
+                  "REGISTRASI",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 4,
+                  ),
+                ),
+                Text(
+                  "Mitra Driver Medan Flow",
+                  style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildFooterSection() {
-    return Center(
-      child: Column(
+  Widget _buildStepInfo() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: primaryColor.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: primaryColor.withOpacity(0.1)),
+      ),
+      child: Row(
         children: [
-          const Text(
-            "Belum memiliki akun Driver?",
-            style: TextStyle(color: Colors.grey, fontSize: 14),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const DriverRegisterScreen()),
-              );
-            },
+          Icon(Icons.info_outline, color: primaryColor, size: 20),
+          const SizedBox(width: 10),
+          const Expanded(
             child: Text(
-              "Daftar Sekarang",
-              style: TextStyle(
-                color: primaryColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Divider(indent: 50, endIndent: 50),
-          const SizedBox(height: 10),
-          const Text(
-            "Admin Pemerintah?",
-            style: TextStyle(color: Colors.grey, fontSize: 13),
-          ),
-          TextButton(
-            onPressed: () {},
-            child: Text(
-              "Hubungi IT DISHUB Medan",
-              style: TextStyle(
-                color: Colors.blueGrey.shade700,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-                decoration: TextDecoration.underline,
-              ),
+              "Setelah mendaftar, Anda wajib memverifikasi email melalui OTP.",
+              style: TextStyle(fontSize: 12, color: Colors.black54),
             ),
           ),
         ],
