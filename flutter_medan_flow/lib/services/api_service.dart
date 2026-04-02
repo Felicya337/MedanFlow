@@ -3,7 +3,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  final String baseUrl = "http://172.17.65.115:8000/api"; // GANTI IP ANDA
+  // final String baseUrl = "http://172.17.65.115:8000/api";
+  final String baseUrl = "http://192.168.39.164:8000/api";
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     final response = await http.post(
@@ -72,14 +73,48 @@ class ApiService {
     throw Exception('Gagal mengambil notifikasi');
   }
 
+  Future<Map<String, dynamic>> getTravelPrediction(
+    double oriLat,
+    double oriLng,
+    double destLat,
+    double destLng,
+  ) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('token');
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/predictions/travel-time'),
+      headers: {'Accept': 'application/json'},
+      body: {
+        'origin_lat': oriLat.toString(),
+        'origin_lng': oriLng.toString(),
+        'dest_lat': destLat.toString(),
+        'dest_lng': destLng.toString(),
+      },
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      print("Error Prediksi: ${response.body}");
+      throw Exception('Gagal mengambil prediksi: ${response.statusCode}');
+    }
+  }
+
   Future<Map<String, dynamic>> registerDriver(Map<String, String> data) async {
-    final res = await http.post(Uri.parse('$baseUrl/register-driver'), body: data);
+    final res = await http.post(
+      Uri.parse('$baseUrl/register-driver'),
+      body: data,
+    );
     if (res.statusCode == 200) return jsonDecode(res.body);
     throw Exception(jsonDecode(res.body)['message'] ?? 'Gagal Registrasi');
   }
 
   Future<Map<String, dynamic>> verifyOtp(String email, String code) async {
-    final res = await http.post(Uri.parse('$baseUrl/verify-otp'), body: {'email': email, 'code': code});
+    final res = await http.post(
+      Uri.parse('$baseUrl/verify-otp'),
+      body: {'email': email, 'code': code},
+    );
     if (res.statusCode == 200) return jsonDecode(res.body);
     throw Exception(jsonDecode(res.body)['message'] ?? 'OTP Salah');
   }

@@ -310,7 +310,7 @@ class _LandingPageState extends State<LandingPage> {
                     _weatherData!['icon'] == 'rainy' ? Icons.cloudy_snowing : (_weatherData!['icon'] == 'cloudy' ? Icons.cloud : Icons.wb_sunny),
                     color: Colors.white, size: 48,
                   ),
-                  Text("${_weatherData!['temp']}°C", style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                  Text("${_weatherData!['temp']}", style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
                 ],
               )
             ],

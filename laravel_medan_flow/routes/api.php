@@ -9,12 +9,14 @@ use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\DriverManagementController;
 use App\Http\Controllers\Api\WeatherController;
 use App\Http\Controllers\Api\DriverController;
+use Illuminate\Support\Facades\Route;
 
 // Public Routes
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/recommendations', [RecommendationController::class, 'getRecommendations']);
 Route::get('/predict-time', [PredictionController::class, 'getTravelTimePrediction']);
+Route::post('/predictions/travel-time', [PredictionController::class, 'getTravelTimePrediction']);
 Route::get('/traffic-heatmap', [TrafficMapController::class, 'getPredictiveHeatmap']);
 Route::get('/weather/current', [WeatherController::class, 'getCurrentWeather']);
 

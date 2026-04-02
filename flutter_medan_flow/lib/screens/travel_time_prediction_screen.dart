@@ -1,279 +1,458 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import '../services/api_service.dart';
 
 class TravelTimePredictionScreen extends StatefulWidget {
   const TravelTimePredictionScreen({super.key});
 
   @override
-  State<TravelTimePredictionScreen> createState() => _TravelTimePredictionScreenState();
+  State<TravelTimePredictionScreen> createState() =>
+      _TravelTimePredictionScreenState();
 }
 
-class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen> {
-  Map<String, dynamic>? _data;
+class _TravelTimePredictionScreenState
+    extends State<TravelTimePredictionScreen> {
+  final MapController _mapController = MapController();
+  final LatLng _medanCenter = const LatLng(3.5952, 98.6722);
+  late LatLng _currentMapCenter;
+
+  // State Manajemen Fase
+  int _step = 0; // 0 = Pilih Asal, 1 = Pilih Tujuan, 2 = Tampilkan Hasil
   bool _isLoading = false;
-  int _selectedRouteId = 1;
+
+  LatLng? _originPoint;
+  LatLng? _destPoint;
+  Map<String, dynamic>? _predictionData;
+  List<LatLng> _routePoints = [];
 
   final Color primaryColor = const Color(0xFF00796B);
 
-  Future<void> _getPrediction() async {
+  @override
+  void initState() {
+    super.initState();
+    _currentMapCenter = _medanCenter;
+  }
+
+  Future<void> _calculateRoute() async {
+    if (_originPoint == null || _destPoint == null) return;
+
     setState(() => _isLoading = true);
+
     try {
-      final response = await http.get(
-        Uri.parse("${ApiService().baseUrl}/predict-time?route_id=$_selectedRouteId"),
+      final result = await ApiService().getTravelPrediction(
+        _originPoint!.latitude,
+        _originPoint!.longitude,
+        _destPoint!.latitude,
+        _destPoint!.longitude,
       );
-      if (response.statusCode == 200) {
-        setState(() => _data = jsonDecode(response.body));
+
+      if (result != null) {
+        // Ambil data polyline dari JSON
+        List<LatLng> points = [];
+        if (result['route_geometry'] != null) {
+          for (var point in result['route_geometry']) {
+            points.add(LatLng(point[1], point[0])); // Balik LngLat jadi LatLng
+          }
+        }
+
+        setState(() {
+          _predictionData = result;
+          _routePoints = points;
+          _step = 2; // Pindah ke fase Hasil
+        });
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Gagal terhubung ke server Medan Flow")),
+        const SnackBar(
+          content: Text("Gagal mengambil estimasi waktu. Cek koneksi Anda."),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
+  void _resetScreen() {
+    setState(() {
+      _step = 0;
+      _originPoint = null;
+      _destPoint = null;
+      _predictionData = null;
+      _routePoints.clear();
+      _mapController.move(_currentMapCenter, 15.0);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      extendBodyBehindAppBar: true, // Peta tembus ke belakang AppBar
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text("Analisis Waktu AI", 
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        centerTitle: true,
-      ),
-      body: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 1. Header Insight
-            Row(
-              children: [
-                const Icon(Icons.auto_awesome, color: Colors.amber, size: 28),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text("Smart Prediction", 
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                      Text("Data diproses berdasarkan trafik & cuaca terkini", 
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 25),
-
-            // 2. Route Selector Card
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 20)],
+        leading: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: CircleAvatar(
+            backgroundColor: Colors.white,
+            child: IconButton(
+              icon: const Icon(
+                Icons.arrow_back_ios_new,
+                size: 18,
+                color: Colors.black,
               ),
-              child: Column(
-                children: [
-                  _buildRouteInputVisual(),
-                  const SizedBox(height: 20),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 15),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F3F4),
-                      borderRadius: BorderRadius.circular(12),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+        ),
+      ),
+      body: Stack(
+        children: [
+          // 1. LAYER PETA UTAMA
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: _medanCenter,
+              initialZoom: 15.0,
+              onPositionChanged: (position, hasGesture) {
+                if (hasGesture && _step < 2) {
+                  setState(() => _currentMapCenter = position.center!);
+                }
+              },
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.flutter_medan_flow',
+              ),
+              // Garis Rute (Hanya muncul di Step 2)
+              if (_step == 2 && _routePoints.isNotEmpty)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: _routePoints,
+                      color: Colors.blueAccent,
+                      strokeWidth: 5.0,
                     ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        value: _selectedRouteId,
-                        isExpanded: true,
-                        items: const [
-                          DropdownMenuItem(value: 1, child: Text("KPUM 64: Amplas - Pinang Baris")),
-                          DropdownMenuItem(value: 2, child: Text("Morina 81: Simalingkar - Amplas")),
-                        ],
-                        onChanged: (val) => setState(() => _selectedRouteId = val!),
+                  ],
+                ),
+              // Marker yang sudah ditancapkan
+              MarkerLayer(
+                markers: [
+                  if (_originPoint != null)
+                    Marker(
+                      point: _originPoint!,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(
+                        Icons.location_on,
+                        color: Colors.green,
+                        size: 40,
                       ),
                     ),
-                  ),
+                  if (_destPoint != null && _step == 2)
+                    Marker(
+                      point: _destPoint!,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(
+                        Icons.location_on,
+                        color: Colors.red,
+                        size: 40,
+                      ),
+                    ),
                 ],
               ),
-            ),
-            const SizedBox(height: 20),
+            ],
+          ),
 
-            // 3. Action Button
-            SizedBox(
-              width: double.infinity,
-              height: 55,
-              child: ElevatedButton(
-                onPressed: _getPrediction,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primaryColor,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 0,
+          // 2. PIN MELAYANG DI TENGAH (Hanya untuk Step 0 dan 1)
+          if (_step < 2)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 40.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _step == 0
+                            ? "Geser peta untuk Titik Asal"
+                            : "Geser peta untuk Titik Tujuan",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Icon(
+                      Icons.location_on,
+                      color: _step == 0
+                          ? Colors.green
+                          : Colors.red, // Hijau untuk asal, Merah untuk tujuan
+                      size: 50,
+                    ),
+                  ],
                 ),
-                child: _isLoading 
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text("ANALISIS ESTIMASI SEKARANG", 
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ),
 
-            const SizedBox(height: 30),
+          // 3. KARTU INFORMASI DI ATAS
+          if (_step < 2)
+            Positioned(
+              top: 100,
+              left: 20,
+              right: 20,
+              child: Container(
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(15),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black12, blurRadius: 10),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _step == 0 ? Icons.my_location : Icons.flag,
+                      color: primaryColor,
+                    ),
+                    const SizedBox(width: 15),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _step == 0
+                                ? "Tentukan Lokasi Jemput"
+                                : "Tentukan Lokasi Tujuan",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          Text(
+                            "Arahkan pin tepat di jalan raya",
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
-            // 4. Result Area
-            if (_data != null && !_isLoading) ...[
-              _buildHeroResultCard(),
-              const SizedBox(height: 25),
-              const Text("Detail Faktor & Akurasi", 
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 15),
-              _buildDetailGrid(),
-              const SizedBox(height: 40),
-            ]
-          ],
-        ),
-      ),
-    );
-  }
+          // 4. TOMBOL AKSI DI BAWAH (Step 0 dan 1)
+          if (_step < 2)
+            Positioned(
+              bottom: 30,
+              left: 20,
+              right: 20,
+              child: SizedBox(
+                height: 55,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                  ),
+                  onPressed: () {
+                    if (_step == 0) {
+                      setState(() {
+                        _originPoint = _currentMapCenter;
+                        _step = 1; // Lanjut pilih tujuan
+                      });
+                    } else if (_step == 1) {
+                      setState(() => _destPoint = _currentMapCenter);
+                      _calculateRoute(); // Langsung hitung API
+                    }
+                  },
+                  child: _isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : Text(
+                          _step == 0
+                              ? "SET LOKASI JEMPUT"
+                              : "CEK ESTIMASI WAKTU",
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ),
+            ),
 
-  Widget _buildRouteInputVisual() {
-    return Row(
-      children: [
-        Column(
-          children: [
-            const Icon(Icons.radio_button_checked, color: Colors.blue, size: 18),
-            Container(width: 2, height: 30, color: Colors.grey.shade300),
-            const Icon(Icons.location_on, color: Colors.red, size: 18),
-          ],
-        ),
-        const SizedBox(width: 15),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(_selectedRouteId == 1 ? "Terminal Amplas" : "Simalingkar", 
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 25),
-              Text(_selectedRouteId == 1 ? "Pinang Baris" : "Terminal Amplas", 
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            ],
-          ),
-        )
-      ],
-    );
-  }
+          // 5. KARTU HASIL PREDIKSI (Hanya Step 2)
+          if (_step == 2 && _predictionData != null)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.all(25),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 20,
+                      offset: Offset(0, -5),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Handle Bar (Garis kecil di atas bottom sheet)
+                    Container(
+                      width: 40,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
 
-  Widget _buildHeroResultCard() {
-    final statusColor = _getStatusColor(_data!['status_color']);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(30),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [statusColor, statusColor.withOpacity(0.8)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(color: statusColor.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10))
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "ESTIMASI TIBA",
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              _predictionData!['predicted_time'],
+                              style: const TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getStatusColor(
+                              _predictionData!['status_color'],
+                            ).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            _predictionData!['congestion_level'],
+                            style: TextStyle(
+                              color: _getStatusColor(
+                                _predictionData!['status_color'],
+                              ),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const Divider(),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildMiniInfo(
+                          Icons.map,
+                          "Jarak",
+                          _predictionData!['distance'],
+                        ),
+                        _buildMiniInfo(
+                          Icons.wb_cloudy,
+                          "Cuaca",
+                          _predictionData!['prediction_factors']['weather'],
+                        ),
+                        _buildMiniInfo(
+                          Icons.traffic,
+                          "Delay",
+                          _predictionData!['delay'],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 25),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: primaryColor,
+                          side: BorderSide(color: primaryColor),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: _resetScreen,
+                        child: const Text(
+                          "CARI RUTE LAIN",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
-      child: Column(
-        children: [
-          const Text("ESTIMASI PERJALANAN", 
-            style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-          const SizedBox(height: 10),
-          Text(_data!['predicted_time'], 
-            style: const TextStyle(color: Colors.white, fontSize: 54, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-            child: Text(_data!['congestion_level'], 
-              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(height: 20),
-          const Divider(color: Colors.white24),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _heroInfoItem("Normal", _data!['normal_time']),
-              _heroInfoItem("Delay", _data!['delay']),
-            ],
-          )
-        ],
-      ),
     );
   }
 
-  Widget _heroInfoItem(String label, String value) {
+  Widget _buildMiniInfo(IconData icon, String label, String value) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)),
-        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+        Icon(icon, color: Colors.grey, size: 20),
+        const SizedBox(height: 5),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
+        Text(
+          value,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        ),
       ],
-    );
-  }
-
-  Widget _buildDetailGrid() {
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      crossAxisSpacing: 15,
-      mainAxisSpacing: 15,
-      childAspectRatio: 1.4,
-      children: [
-        _buildDetailItem("Jarak Tempuh", _data!['distance'], Icons.map_outlined, Colors.blue),
-        _buildDetailItem("Faktor Cuaca", _data!['prediction_factors']['weather'], Icons.wb_cloudy_outlined, Colors.orange),
-        _buildDetailItem("Kepersisiam AI", _data!['prediction_factors']['confidence_level'], Icons.verified_outlined, Colors.teal),
-        _buildDetailItem("Update Terakhir", _data!['current_time'], Icons.access_time, Colors.grey),
-      ],
-    );
-  }
-
-  Widget _buildDetailItem(String label, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade100),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
-          const SizedBox(height: 2),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-        ],
-      ),
     );
   }
 
   Color _getStatusColor(String colorName) {
     switch (colorName) {
-      case 'red': return const Color(0xFFE53935);
-      case 'orange': return const Color(0xFFFB8C00);
-      case 'blue': return const Color(0xFF1E88E5);
-      default: return const Color(0xFF43A047);
+      case 'red':
+        return const Color(0xFFE53935);
+      case 'orange':
+        return const Color(0xFFFB8C00);
+      case 'blue':
+        return const Color(0xFF1E88E5);
+      default:
+        return const Color(0xFF43A047);
     }
   }
 }
