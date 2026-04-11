@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -34,39 +36,51 @@ class _TravelTimePredictionScreenState
     _currentMapCenter = _medanCenter;
   }
 
+  // Fungsi memanggil API Prediksi Perjalanan di Laravel
   Future<void> _calculateRoute() async {
     if (_originPoint == null || _destPoint == null) return;
 
     setState(() => _isLoading = true);
 
     try {
-      final result = await ApiService().getTravelPrediction(
+      // Pastikan method getTravelPrediction sudah ada di ApiService Anda
+      final response = await ApiService().getTravelPrediction(
         _originPoint!.latitude,
         _originPoint!.longitude,
         _destPoint!.latitude,
         _destPoint!.longitude,
       );
 
-      if (result != null) {
-        // Ambil data polyline dari JSON
+      if (response != null) {
         List<LatLng> points = [];
-        if (result['route_geometry'] != null) {
-          for (var point in result['route_geometry']) {
-            points.add(LatLng(point[1], point[0])); // Balik LngLat jadi LatLng
+        if (response['route_geometry'] != null) {
+          for (var point in response['route_geometry']) {
+            points.add(LatLng(point[1], point[0]));
           }
+        } else {
+          points = [_originPoint!, _destPoint!];
         }
 
         setState(() {
-          _predictionData = result;
+          _predictionData = response;
           _routePoints = points;
           _step = 2; // Pindah ke fase Hasil
         });
+        
+        _mapController.move(
+          LatLng(
+            (_originPoint!.latitude + _destPoint!.latitude) / 2,
+            (_originPoint!.longitude + _destPoint!.longitude) / 2,
+          ), 
+          13.5
+        );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Gagal mengambil estimasi waktu. Cek koneksi Anda."),
+          content: Text("Gagal menganalisis rute. Cek koneksi ke server."),
           backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     } finally {
@@ -88,7 +102,7 @@ class _TravelTimePredictionScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true, // Peta tembus ke belakang AppBar
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -97,11 +111,7 @@ class _TravelTimePredictionScreenState
           child: CircleAvatar(
             backgroundColor: Colors.white,
             child: IconButton(
-              icon: const Icon(
-                Icons.arrow_back_ios_new,
-                size: 18,
-                color: Colors.black,
-              ),
+              icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.black),
               onPressed: () => Navigator.pop(context),
             ),
           ),
@@ -109,7 +119,7 @@ class _TravelTimePredictionScreenState
       ),
       body: Stack(
         children: [
-          // 1. LAYER PETA UTAMA
+          // 1. LAYER PETA UTAMA (MAPBOX TRAFFIC)
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -123,51 +133,51 @@ class _TravelTimePredictionScreenState
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.flutter_medan_flow',
+                urlTemplate: 'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
+                additionalOptions: const {
+                  'accessToken': ApiService.mapboxToken,
+                  'id': ApiService.mapboxTrafficStyle,
+                },
+                userAgentPackageName: 'com.medanflow.app',
               ),
-              // Garis Rute (Hanya muncul di Step 2)
+              
+              // Garis Rute (Polyline) - Perbaikan Parameter di sini
               if (_step == 2 && _routePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
                       points: _routePoints,
-                      color: Colors.blueAccent,
+                      color: primaryColor,
                       strokeWidth: 5.0,
+                      strokeCap: StrokeCap.round,
+                      strokeJoin: StrokeJoin.round,
                     ),
                   ],
                 ),
-              // Marker yang sudah ditancapkan
+                
+              // Marker Lokasi
               MarkerLayer(
                 markers: [
                   if (_originPoint != null)
                     Marker(
                       point: _originPoint!,
-                      width: 40,
-                      height: 40,
-                      child: const Icon(
-                        Icons.location_on,
-                        color: Colors.green,
-                        size: 40,
-                      ),
+                      width: 45,
+                      height: 45,
+                      child: const Icon(Icons.location_on, color: Colors.green, size: 45),
                     ),
                   if (_destPoint != null && _step == 2)
                     Marker(
                       point: _destPoint!,
-                      width: 40,
-                      height: 40,
-                      child: const Icon(
-                        Icons.location_on,
-                        color: Colors.red,
-                        size: 40,
-                      ),
+                      width: 45,
+                      height: 45,
+                      child: const Icon(Icons.location_on, color: Colors.red, size: 45),
                     ),
                 ],
               ),
             ],
           ),
 
-          // 2. PIN MELAYANG DI TENGAH (Hanya untuk Step 0 dan 1)
+          // 2. PIN SELECTOR MELAYANG
           if (_step < 2)
             Center(
               child: Padding(
@@ -176,57 +186,46 @@ class _TravelTimePredictionScreenState
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.black87,
+                        color: Colors.black.withOpacity(0.8),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        _step == 0
-                            ? "Geser peta untuk Titik Asal"
-                            : "Geser peta untuk Titik Tujuan",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                        ),
+                        _step == 0 ? "Titik Keberangkatan" : "Titik Tujuan Perjalanan",
+                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
                     const SizedBox(height: 5),
-                    Icon(
+                    const Icon(
                       Icons.location_on,
-                      color: _step == 0
-                          ? Colors.green
-                          : Colors.red, // Hijau untuk asal, Merah untuk tujuan
-                      size: 50,
+                      color: Colors.orange,
+                      size: 55,
                     ),
                   ],
                 ),
               ),
             ),
 
-          // 3. KARTU INFORMASI DI ATAS
+          // 3. FLOATING INFO CARD
           if (_step < 2)
             Positioned(
               top: 100,
               left: 20,
               right: 20,
               child: Container(
-                padding: const EdgeInsets.all(15),
+                padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(15),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black12, blurRadius: 10),
-                  ],
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 15)],
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      _step == 0 ? Icons.my_location : Icons.flag,
-                      color: primaryColor,
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), shape: BoxShape.circle),
+                      child: Icon(_step == 0 ? Icons.my_location : Icons.flag_rounded, color: primaryColor, size: 20),
                     ),
                     const SizedBox(width: 15),
                     Expanded(
@@ -234,21 +233,10 @@ class _TravelTimePredictionScreenState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _step == 0
-                                ? "Tentukan Lokasi Jemput"
-                                : "Tentukan Lokasi Tujuan",
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
+                            _step == 0 ? "Tentukan Lokasi Jemput" : "Tentukan Lokasi Tujuan",
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                           ),
-                          Text(
-                            "Arahkan pin tepat di jalan raya",
-                            style: TextStyle(
-                              color: Colors.grey.shade600,
-                              fontSize: 12,
-                            ),
-                          ),
+                          const Text("Geser peta untuk memposisikan pin", style: TextStyle(color: Colors.grey, fontSize: 12)),
                         ],
                       ),
                     ),
@@ -257,167 +245,107 @@ class _TravelTimePredictionScreenState
               ),
             ),
 
-          // 4. TOMBOL AKSI DI BAWAH (Step 0 dan 1)
+          // 4. ACTION BUTTON
           if (_step < 2)
             Positioned(
-              bottom: 30,
-              left: 20,
-              right: 20,
+              bottom: 40,
+              left: 30,
+              right: 30,
               child: SizedBox(
-                height: 55,
+                height: 58,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    elevation: 8,
                   ),
                   onPressed: () {
                     if (_step == 0) {
                       setState(() {
                         _originPoint = _currentMapCenter;
-                        _step = 1; // Lanjut pilih tujuan
+                        _step = 1;
                       });
                     } else if (_step == 1) {
                       setState(() => _destPoint = _currentMapCenter);
-                      _calculateRoute(); // Langsung hitung API
+                      _calculateRoute();
                     }
                   },
                   child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                       : Text(
-                          _step == 0
-                              ? "SET LOKASI JEMPUT"
-                              : "CEK ESTIMASI WAKTU",
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          _step == 0 ? "KONFIRMASI ASAL" : "ANALISIS ESTIMASI WAKTU",
+                          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
                         ),
                 ),
               ),
             ),
 
-          // 5. KARTU HASIL PREDIKSI (Hanya Step 2)
+          // 5. KARTU HASIL ANALISIS AI (Step 2)
           if (_step == 2 && _predictionData != null)
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.all(25),
+                padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 30),
                 decoration: const BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 20,
-                      offset: Offset(0, -5),
-                    ),
-                  ],
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(35)),
+                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 25, offset: Offset(0, -5))],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Handle Bar (Garis kecil di atas bottom sheet)
-                    Container(
-                      width: 40,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
+                    Container(width: 45, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
+                    const SizedBox(height: 25),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              "ESTIMASI TIBA",
-                              style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              _predictionData!['predicted_time'],
-                              style: const TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            const Text("ESTIMASI PERJALANAN", style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 4),
+                            Text(_predictionData!['predicted_time'], style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Color(0xFF263238))),
                           ],
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
-                            color: _getStatusColor(
-                              _predictionData!['status_color'],
-                            ).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
+                            color: _getStatusColor(_predictionData!['status_color']).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(15),
                           ),
                           child: Text(
-                            _predictionData!['congestion_level'],
-                            style: TextStyle(
-                              color: _getStatusColor(
-                                _predictionData!['status_color'],
-                              ),
-                              fontWeight: FontWeight.bold,
-                            ),
+                            _predictionData!['congestion_level'].toUpperCase(),
+                            style: TextStyle(color: _getStatusColor(_predictionData!['status_color']), fontSize: 10, fontWeight: FontWeight.bold),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    const Divider(),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildMiniInfo(
-                          Icons.map,
-                          "Jarak",
-                          _predictionData!['distance'],
-                        ),
-                        _buildMiniInfo(
-                          Icons.wb_cloudy,
-                          "Cuaca",
-                          _predictionData!['prediction_factors']['weather'],
-                        ),
-                        _buildMiniInfo(
-                          Icons.traffic,
-                          "Delay",
-                          _predictionData!['delay'],
                         ),
                       ],
                     ),
                     const SizedBox(height: 25),
+                    const Divider(height: 1),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _buildMiniInfo(Icons.route_outlined, "Jarak", _predictionData!['distance']),
+                        _buildMiniInfo(Icons.cloud_queue_rounded, "Cuaca", _predictionData!['prediction_factors']['weather']),
+                        _buildMiniInfo(Icons.timer_outlined, "Delay", _predictionData!['delay']),
+                      ],
+                    ),
+                    const SizedBox(height: 30),
                     SizedBox(
                       width: double.infinity,
-                      height: 50,
-                      child: OutlinedButton(
+                      height: 52,
+                      child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: primaryColor,
-                          side: BorderSide(color: primaryColor),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          side: BorderSide(color: primaryColor, width: 1.5),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                         ),
                         onPressed: _resetScreen,
-                        child: const Text(
-                          "CARI RUTE LAIN",
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        icon: const Icon(Icons.refresh_rounded, size: 20),
+                        label: const Text("CARI RUTE LAIN", style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ],
@@ -430,29 +358,25 @@ class _TravelTimePredictionScreenState
   }
 
   Widget _buildMiniInfo(IconData icon, String label, String value) {
-    return Column(
-      children: [
-        Icon(icon, color: Colors.grey, size: 20),
-        const SizedBox(height: 5),
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
-        Text(
-          value,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-        ),
-      ],
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: primaryColor.withOpacity(0.6), size: 22),
+          const SizedBox(height: 6),
+          Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 10, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 2),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF263238))),
+        ],
+      ),
     );
   }
 
   Color _getStatusColor(String colorName) {
     switch (colorName) {
-      case 'red':
-        return const Color(0xFFE53935);
-      case 'orange':
-        return const Color(0xFFFB8C00);
-      case 'blue':
-        return const Color(0xFF1E88E5);
-      default:
-        return const Color(0xFF43A047);
+      case 'red': return const Color(0xFFD32F2F);
+      case 'orange': return const Color(0xFFF57C00);
+      case 'blue': return const Color(0xFF1976D2);
+      default: return const Color(0xFF388E3C);
     }
   }
 }

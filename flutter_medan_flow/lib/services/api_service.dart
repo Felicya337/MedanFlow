@@ -1,10 +1,15 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
 
 class ApiService {
   // final String baseUrl = "http://172.17.65.115:8000/api";
-  final String baseUrl = "http://192.168.39.164:8000/api";
+  final String baseUrl = "http://172.17.65.115:8000/api";
+
+  static const String mapboxToken = AppConfig.mapboxToken;
+  static const String mapboxTrafficStyle = "mapbox/traffic-day-v2";
+  static const String mapboxDarkStyle = "mapbox/dark-v11";
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     final response = await http.post(

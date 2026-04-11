@@ -4,73 +4,67 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Route;
-use App\Models\TrafficData;
-use App\Models\WeatherData;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 
 class RecommendationController extends Controller
 {
     public function getRecommendations(Request $request)
     {
-        // Mengambil semua data rute dari database
+        $userLat = $request->query('lat');
+        $userLng = $request->query('lng');
+
+        // PASTI LAKUKAN INI:
+        // 1. Login ke mapbox.com
+        // 2. Cari "Default public token" yang berawalan pk.xxx
+        // 3. Masukkan ke variabel di bawah ini (Ganti teks di bawah dengan token Anda)
+        $token = env('MAPBOX_ACCESS_TOKEN');
+
+        // Tujuan: Pinang Baris
+        $destLat = 3.6031;
+        $destLng = 98.6250;
+
         $routes = Route::all();
+        $weatherData = app(WeatherController::class)->getWeatherData();
 
-        $recommendations = $routes->map(function ($route) {
-            // Ambil data trafik terbaru (Simulasi AI sederhana)
-            $traffic = TrafficData::latest()->first();
-            $weather = WeatherData::latest()->first();
+        $recommendations = $routes->map(function ($route) use ($userLat, $userLng, $token, $destLat, $destLng) {
+            $geometry = [];
+            $duration = 25;
+            $distance = $route->distance;
 
-            // LOGIKA ESTIMASI WAKTU (ETA)
-            // Dasar waktu: Jarak dikali 4 menit per kilometer (rata-rata kecepatan angkot)
-            $baseEta = $route->distance * 4;
+            if ($userLat && $userLng) {
+                // PROFILE: driving-traffic (Inilah yang mendeteksi kemacetan real-time)
+                $url = "https://api.mapbox.com/directions/v5/mapbox/driving-traffic/{$userLng},{$userLat};{$destLng},{$destLat}";
 
-            // Tambahan waktu jika macet (Traffic Factor)
-            $trafficDelay = 0;
-            if ($traffic) {
-                if ($traffic->congestion_level == 'high') $trafficDelay = 15;
-                if ($traffic->congestion_level == 'medium') $trafficDelay = 7;
+                $response = Http::withoutVerifying()->get($url, [
+                    'geometries'   => 'geojson',
+                    'overview'     => 'full',
+                    'access_token' => $token,
+                ]);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    if (!empty($data['routes'])) {
+                        $geometry = $data['routes'][0]['geometry']['coordinates'];
+                        $duration = $data['routes'][0]['duration'] / 60; // Akurat dengan trafik
+                        $distance = $data['routes'][0]['distance'] / 1000;
+                    }
+                } else {
+                    // Log error untuk debug
+                    \Log::error("Mapbox Error: " . $response->body());
+                }
             }
-
-            // Tambahan waktu jika cuaca buruk (Weather Factor)
-            $weatherDelay = 0;
-            if ($weather && (str_contains(strtolower($weather->weather_condition), 'rain') ||
-                             str_contains(strtolower($weather->weather_condition), 'storm'))) {
-                $weatherDelay = 10; // Hujan di Medan biasanya memperlambat arus
-            }
-
-            $totalEta = $baseEta + $trafficDelay + $weatherDelay;
 
             return [
                 'id' => $route->id,
                 'name' => $route->name,
-                'path' => $route->start_point . " -> " . $route->end_point,
-                'distance' => $route->distance . " km",
-                'eta' => round($totalEta) . " Menit",
-                'congestion' => $traffic ? $traffic->congestion_level : 'low',
-                'weather_impact' => $weather ? $weather->weather_condition : 'Clear',
-                // Menyertakan data koordinat untuk digambar di peta Flutter
-                'polyline' => $this->getDummyPolyline($route->id)
+                'distance' => round($distance, 1) . " km",
+                'eta' => round($duration) . " Menit",
+                'congestion' => ($duration > 35) ? 'high' : 'low',
+                'geometry' => $geometry,
             ];
         });
 
         return response()->json($recommendations);
-    }
-
-    /**
-     * Helper untuk memberikan titik koordinat jalur rute
-     * PHP menggunakan operator '=>' untuk array, bukan ':'
-     */
-    private function getDummyPolyline($routeId) {
-        if($routeId == 1) {
-            return [
-                ["lat" => 3.5952, "lng" => 98.6722],
-                ["lat" => 3.5900, "lng" => 98.6800]
-            ];
-        }
-
-        return [
-            ["lat" => 3.5952, "lng" => 98.6722],
-            ["lat" => 3.6000, "lng" => 98.6700]
-        ];
     }
 }

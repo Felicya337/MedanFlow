@@ -52,3 +52,4 @@ app.*.map.json
 laravel_medan_flow/medanflow
 flutter_medan_flow/android/build/
 flutter_medan_flow/build/
+lib/config.dart

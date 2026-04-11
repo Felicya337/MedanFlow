@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_map/flutter_map.dart'; // Import Leaflet
+import 'package:latlong2/latlong.dart';      // Import LatLng
 import '../providers/tracking_provider.dart';
 import '../services/api_service.dart';
 import 'landing_page.dart';
@@ -21,7 +23,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   String _errorMessage = "";
   final ApiService _apiService = ApiService();
 
-  // Warna Tema khusus Driver (Deep Blue/Indigo)
+  // Warna Tema khusus Driver (Deep Blue/Indigo) yang profesional
   final Color primaryColor = const Color(0xFF1A237E); 
   final Color accentColor = const Color(0xFF3949AB);
   final Color scaffoldBg = const Color(0xFFF8F9FA);
@@ -114,7 +116,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               titlePadding: const EdgeInsets.only(bottom: 16),
               title: const Text(
                 "MEDAN FLOW - DRIVER",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white, letterSpacing: 1.2),
               ),
               background: Container(
                 decoration: BoxDecoration(
@@ -137,7 +139,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 2. ZONA GRADASI TRANSISI (Header Fading)
+                // 2. ZONA GRADASI TRANSISI (Header Fading ke Background)
                 Stack(
                   children: [
                     Container(
@@ -159,6 +161,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // 3. MINI TRAFFIC MONITOR (Mapbox Dark Mode)
+                      const Text(
+                        "Live Monitor Trafik Medan",
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF263238)),
+                      ),
+                      const SizedBox(height: 15),
+                      _buildTrafficMiniMap(),
+
+                      const SizedBox(height: 30),
+                      
+                      // 4. INSIGHTS & AI ANALYSIS
                       const Text(
                         "Kondisi Operasional",
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF263238)),
@@ -166,15 +179,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       const SizedBox(height: 15),
 
                       if (_loadingInsight)
-                        Center(child: Padding(padding: const EdgeInsets.all(40), child: CircularProgressIndicator(color: primaryColor)))
+                        const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator()))
                       else if (_errorMessage.isNotEmpty)
                         _buildErrorSection()
                       else
                         _buildInsightSection(),
 
                       const SizedBox(height: 30),
+                      
+                      // 5. TOMBOL UTAMA
                       _buildTrackingButton(context),
+                      
                       const SizedBox(height: 25),
+                      
+                      // 6. INFO ARMADA
                       _buildVehicleInfo(),
                       const SizedBox(height: 50),
                     ],
@@ -184,6 +202,41 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             ),
           )
         ],
+      ),
+    );
+  }
+
+  Widget _buildTrafficMiniMap() {
+    return Container(
+      height: 220,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 15, offset: const Offset(0, 8))],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: FlutterMap(
+          options: const MapOptions(
+            initialCenter: LatLng(3.5952, 98.6722),
+            initialZoom: 13,
+            interactionOptions: InteractionOptions(flags: InteractiveFlag.all),
+          ),
+          children: [
+            // Layer Mapbox Dark
+            TileLayer(
+              urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
+              userAgentPackageName: 'com.medanflow.app',
+            ),
+            // Layer Garis Trafik Mapbox (Night version agar serasi dengan Dark Mode)
+            TileLayer(
+              urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/traffic-night-v2/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
+              userAgentPackageName: 'com.medanflow.app',
+              backgroundColor: Colors.transparent,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -205,7 +258,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               CircleAvatar(
                 radius: 30,
                 backgroundColor: primaryColor.withOpacity(0.1),
-                child: Icon(Icons.person, color: primaryColor, size: 30),
+                child: Icon(Icons.person_rounded, color: primaryColor, size: 30),
               ),
               const SizedBox(width: 15),
               Column(
@@ -267,7 +320,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           children: [
             _insightTile("Cuaca Medan", _insights!['weather']['temp'] ?? "--", _insights!['weather']['condition'], weatherIcon, weatherColor),
             const SizedBox(width: 15),
-            _insightTile("Lalu Lintas", _insights!['traffic']['level'].toString().toUpperCase(), _insights!['traffic']['description'], Icons.traffic_outlined, Colors.deepOrange),
+            _insightTile("Trafik", _insights!['traffic']['description'], "Skor Kerja: ${_insights!['work_score'] ?? 0}", Icons.traffic_outlined, Colors.deepOrange),
           ],
         ),
         const SizedBox(height: 15),
