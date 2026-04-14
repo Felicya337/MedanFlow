@@ -6,9 +6,7 @@ import 'screens/landing_page.dart';
 void main() {
   runApp(
     MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => TrackingProvider()),
-      ],
+      providers: [ChangeNotifierProvider(create: (_) => TrackingProvider())],
       child: const MyApp(),
     ),
   );
@@ -20,7 +18,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Medan Flow',
+      title: 'MedaFlow',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0083B0)),

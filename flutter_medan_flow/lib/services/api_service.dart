@@ -4,13 +4,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 
 class ApiService {
-  // final String baseUrl = "http://172.17.65.115:8000/api";
-  final String baseUrl = "http://172.17.65.115:8000/api";
+  final String baseUrl = AppConfig.baseUrl;
 
   static const String mapboxToken = AppConfig.mapboxToken;
   static const String mapboxTrafficStyle = "mapbox/traffic-day-v2";
   static const String mapboxDarkStyle = "mapbox/dark-v11";
 
+  // ================= LOGIN =================
   Future<Map<String, dynamic>> login(String email, String password) async {
     final response = await http.post(
       Uri.parse('$baseUrl/login'),
@@ -19,15 +19,18 @@ class ApiService {
 
     if (response.statusCode == 200) {
       var data = jsonDecode(response.body);
+
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString('token', data['token']);
       await prefs.setInt('role_id', data['user']['role_id']);
+
       return data;
     } else {
       throw Exception('Login Gagal: Cek kembali akun Anda');
     }
   }
 
+  // ================= START TRIP =================
   Future<int> startTrip() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('token');
@@ -40,12 +43,12 @@ class ApiService {
     if (response.statusCode == 200) {
       return jsonDecode(response.body)['id'];
     } else {
-      // DEBUG: Cetak isi error dari server agar tahu penyebabnya
       print("Server Error: ${response.body}");
-      throw Exception('Gagal memulai perjalanan: ${response.statusCode}');
+      throw Exception('Gagal memulai perjalanan');
     }
   }
 
+  // ================= UPDATE LOCATION =================
   Future<void> updateLocation(
     int tripId,
     double lat,
@@ -54,6 +57,7 @@ class ApiService {
   ) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('token');
+
     await http.post(
       Uri.parse('$baseUrl/trips/$tripId/location'),
       headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
@@ -65,28 +69,35 @@ class ApiService {
     );
   }
 
+  // ================= GET ANGKOT =================
   Future<List<dynamic>> getActiveAngkots() async {
     final response = await http.get(Uri.parse('$baseUrl/trips/active'));
-    if (response.statusCode == 200) return jsonDecode(response.body);
-    throw Exception('Gagal mengambil data angkot');
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Gagal mengambil data angkot');
+    }
   }
 
-  // Fungsi Baru: Ambil Notifikasi Cerdas
+  // ================= NOTIFICATIONS =================
   Future<Map<String, dynamic>> getNotifications() async {
     final response = await http.get(Uri.parse('$baseUrl/notifications'));
-    if (response.statusCode == 200) return jsonDecode(response.body);
-    throw Exception('Gagal mengambil notifikasi');
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Gagal mengambil notifikasi');
+    }
   }
 
+  // ================= PREDICTION =================
   Future<Map<String, dynamic>> getTravelPrediction(
     double oriLat,
     double oriLng,
     double destLat,
     double destLng,
   ) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? token = prefs.getString('token');
-
     final response = await http.post(
       Uri.parse('$baseUrl/predictions/travel-time'),
       headers: {'Accept': 'application/json'},
@@ -102,25 +113,37 @@ class ApiService {
       return jsonDecode(response.body);
     } else {
       print("Error Prediksi: ${response.body}");
-      throw Exception('Gagal mengambil prediksi: ${response.statusCode}');
+      throw Exception('Gagal mengambil prediksi');
     }
   }
 
+  // ================= REGISTER DRIVER =================
   Future<Map<String, dynamic>> registerDriver(Map<String, String> data) async {
-    final res = await http.post(
+    final response = await http.post(
       Uri.parse('$baseUrl/register-driver'),
       body: data,
     );
-    if (res.statusCode == 200) return jsonDecode(res.body);
-    throw Exception(jsonDecode(res.body)['message'] ?? 'Gagal Registrasi');
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Gagal Registrasi',
+      );
+    }
   }
 
+  // ================= VERIFY OTP =================
   Future<Map<String, dynamic>> verifyOtp(String email, String code) async {
-    final res = await http.post(
+    final response = await http.post(
       Uri.parse('$baseUrl/verify-otp'),
       body: {'email': email, 'code': code},
     );
-    if (res.statusCode == 200) return jsonDecode(res.body);
-    throw Exception(jsonDecode(res.body)['message'] ?? 'OTP Salah');
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception(jsonDecode(response.body)['message'] ?? 'OTP Salah');
+    }
   }
 }

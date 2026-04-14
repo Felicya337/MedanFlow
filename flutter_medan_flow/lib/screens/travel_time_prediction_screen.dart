@@ -5,6 +5,28 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../services/api_service.dart';
 
+// ─────────────────────────────────────────────
+// Palette (sama persis dengan LandingPage)
+// ─────────────────────────────────────────────
+class _P {
+  static const b50 = Color(0xFFEFF6FF);
+  static const b100 = Color(0xFFDBEAFE);
+  static const b200 = Color(0xFFBFDBFE);
+  static const b300 = Color(0xFF93C5FD);
+  static const b400 = Color(0xFF60A5FA);
+  static const b500 = Color(0xFF3B82F6);
+  static const b600 = Color(0xFF2563EB);
+  static const b700 = Color(0xFF1D4ED8);
+  static const b800 = Color(0xFF1E40AF);
+  static const bg = Color(0xFFEEF4FF);
+  static const card = Colors.white;
+  static const ink = Color(0xFF0F172A);
+  static const ink2 = Color(0xFF334155);
+  static const ink3 = Color(0xFF64748B);
+  static const ink4 = Color(0xFF94A3B8);
+  static const dark = Color(0xFF0F2878);
+}
+
 class TravelTimePredictionScreen extends StatefulWidget {
   const TravelTimePredictionScreen({super.key});
 
@@ -28,29 +50,22 @@ class _TravelTimePredictionScreenState
   Map<String, dynamic>? _predictionData;
   List<LatLng> _routePoints = [];
 
-  final Color primaryColor = const Color(0xFF00796B);
-
   @override
   void initState() {
     super.initState();
     _currentMapCenter = _medanCenter;
   }
 
-  // Fungsi memanggil API Prediksi Perjalanan di Laravel
   Future<void> _calculateRoute() async {
     if (_originPoint == null || _destPoint == null) return;
-
     setState(() => _isLoading = true);
-
     try {
-      // Pastikan method getTravelPrediction sudah ada di ApiService Anda
       final response = await ApiService().getTravelPrediction(
         _originPoint!.latitude,
         _originPoint!.longitude,
         _destPoint!.latitude,
         _destPoint!.longitude,
       );
-
       if (response != null) {
         List<LatLng> points = [];
         if (response['route_geometry'] != null) {
@@ -60,26 +75,24 @@ class _TravelTimePredictionScreenState
         } else {
           points = [_originPoint!, _destPoint!];
         }
-
         setState(() {
           _predictionData = response;
           _routePoints = points;
-          _step = 2; // Pindah ke fase Hasil
+          _step = 2;
         });
-        
         _mapController.move(
           LatLng(
             (_originPoint!.latitude + _destPoint!.latitude) / 2,
             (_originPoint!.longitude + _destPoint!.longitude) / 2,
-          ), 
-          13.5
+          ),
+          13.5,
         );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Gagal menganalisis rute. Cek koneksi ke server."),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: Color(0xFFDC2626),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -102,24 +115,56 @@ class _TravelTimePredictionScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _P.bg,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: Padding(
           padding: const EdgeInsets.all(8.0),
-          child: CircleAvatar(
-            backgroundColor: Colors.white,
+          child: Container(
+            decoration: BoxDecoration(
+              color: _P.card,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _P.b100, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: _P.b500.withOpacity(0.10),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
             child: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.black),
+              icon: const Icon(
+                Icons.arrow_back_ios_new,
+                size: 16,
+                color: _P.b600,
+              ),
               onPressed: () => Navigator.pop(context),
             ),
           ),
         ),
+        title: _step < 2
+            ? null
+            : ShaderMask(
+                shaderCallback: (b) => const LinearGradient(
+                  colors: [_P.b600, Color(0xFF06B6D4)],
+                ).createShader(b),
+                child: const Text(
+                  'Hasil Analisis',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+              ),
       ),
       body: Stack(
         children: [
-          // 1. LAYER PETA UTAMA (MAPBOX TRAFFIC)
+          // ── PETA ──────────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -133,29 +178,26 @@ class _TravelTimePredictionScreenState
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
+                urlTemplate:
+                    'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
                 additionalOptions: const {
                   'accessToken': ApiService.mapboxToken,
                   'id': ApiService.mapboxTrafficStyle,
                 },
                 userAgentPackageName: 'com.medanflow.app',
               ),
-              
-              // Garis Rute (Polyline) - Perbaikan Parameter di sini
               if (_step == 2 && _routePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
                       points: _routePoints,
-                      color: primaryColor,
+                      color: _P.b500,
                       strokeWidth: 5.0,
                       strokeCap: StrokeCap.round,
                       strokeJoin: StrokeJoin.round,
                     ),
                   ],
                 ),
-                
-              // Marker Lokasi
               MarkerLayer(
                 markers: [
                   if (_originPoint != null)
@@ -163,81 +205,206 @@ class _TravelTimePredictionScreenState
                       point: _originPoint!,
                       width: 45,
                       height: 45,
-                      child: const Icon(Icons.location_on, color: Colors.green, size: 45),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _P.b600,
+                          boxShadow: [
+                            BoxShadow(
+                              color: _P.b600.withOpacity(0.4),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.my_location_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
                     ),
                   if (_destPoint != null && _step == 2)
                     Marker(
                       point: _destPoint!,
                       width: 45,
                       height: 45,
-                      child: const Icon(Icons.location_on, color: Colors.red, size: 45),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFFDC2626),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFDC2626).withOpacity(0.4),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.flag_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
                     ),
                 ],
               ),
             ],
           ),
 
-          // 2. PIN SELECTOR MELAYANG
+          // ── PIN SELECTOR ──────────────────────────────────────
           if (_step < 2)
             Center(
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 40.0),
+                padding: const EdgeInsets.only(bottom: 44.0),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.8),
+                        color: _P.ink.withOpacity(0.85),
                         borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _P.b800.withOpacity(0.18),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
                       ),
                       child: Text(
-                        _step == 0 ? "Titik Keberangkatan" : "Titik Tujuan Perjalanan",
-                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                        _step == 0
+                            ? "Titik Keberangkatan"
+                            : "Titik Tujuan Perjalanan",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 5),
-                    const Icon(
-                      Icons.location_on,
-                      color: Colors.orange,
-                      size: 55,
+                    const SizedBox(height: 6),
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color:
+                                (_step == 0 ? _P.b600 : const Color(0xFFEA580C))
+                                    .withOpacity(0.40),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.location_on_rounded,
+                        color: _step == 0 ? _P.b500 : const Color(0xFFEA580C),
+                        size: 52,
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
 
-          // 3. FLOATING INFO CARD
+          // ── INFO CARD TOP ──────────────────────────────────────
           if (_step < 2)
             Positioned(
               top: 100,
               left: 20,
               right: 20,
               child: Container(
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: _P.card,
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 15)],
+                  border: Border.all(color: _P.b100, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _P.b500.withOpacity(0.10),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), shape: BoxShape.circle),
-                      child: Icon(_step == 0 ? Icons.my_location : Icons.flag_rounded, color: primaryColor, size: 20),
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: _step == 0
+                              ? [_P.b50, _P.b100]
+                              : [
+                                  const Color(0xFFFFF7ED),
+                                  const Color(0xFFFED7AA),
+                                ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(
+                        _step == 0
+                            ? Icons.my_location_rounded
+                            : Icons.flag_rounded,
+                        color: _step == 0 ? _P.b600 : const Color(0xFFEA580C),
+                        size: 20,
+                      ),
                     ),
-                    const SizedBox(width: 15),
+                    const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _step == 0 ? "Tentukan Lokasi Jemput" : "Tentukan Lokasi Tujuan",
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            _step == 0
+                                ? "Tentukan Lokasi Asal"
+                                : "Tentukan Lokasi Tujuan",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              color: _P.ink,
+                            ),
                           ),
-                          const Text("Geser peta untuk memposisikan pin", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                          const SizedBox(height: 2),
+                          const Text(
+                            "Geser peta untuk memposisikan pin",
+                            style: TextStyle(
+                              color: _P.ink3,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ],
+                      ),
+                    ),
+                    // Step indicator
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _P.b50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: _P.b100, width: 1),
+                      ),
+                      child: Text(
+                        '${_step + 1}/2',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: _P.b600,
+                        ),
                       ),
                     ),
                   ],
@@ -245,19 +412,22 @@ class _TravelTimePredictionScreenState
               ),
             ),
 
-          // 4. ACTION BUTTON
+          // ── ACTION BUTTON ──────────────────────────────────────
           if (_step < 2)
             Positioned(
               bottom: 40,
-              left: 30,
-              right: 30,
+              left: 24,
+              right: 24,
               child: SizedBox(
-                height: 58,
+                height: 56,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                    elevation: 8,
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    padding: EdgeInsets.zero,
                   ),
                   onPressed: () {
                     if (_step == 0) {
@@ -270,82 +440,222 @@ class _TravelTimePredictionScreenState
                       _calculateRoute();
                     }
                   },
-                  child: _isLoading
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-                      : Text(
-                          _step == 0 ? "KONFIRMASI ASAL" : "ANALISIS ESTIMASI WAKTU",
-                          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                  child: Ink(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [_P.b500, _P.b700],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _P.b600.withOpacity(0.40),
+                          blurRadius: 18,
+                          offset: const Offset(0, 6),
                         ),
+                      ],
+                    ),
+                    child: Center(
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : Text(
+                              _step == 0
+                                  ? "KONFIRMASI ASAL"
+                                  : "ANALISIS ESTIMASI WAKTU",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                    ),
+                  ),
                 ),
               ),
             ),
 
-          // 5. KARTU HASIL ANALISIS AI (Step 2)
+          // ── KARTU HASIL ──────────────────────────────────────
           if (_step == 2 && _predictionData != null)
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 30),
                 decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(35)),
-                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 25, offset: Offset(0, -5))],
+                  color: _P.card,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0x1A2563EB),
+                      blurRadius: 32,
+                      offset: Offset(0, -6),
+                    ),
+                  ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(width: 45, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
-                    const SizedBox(height: 25),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text("ESTIMASI PERJALANAN", style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 4),
-                            Text(_predictionData!['predicted_time'], style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Color(0xFF263238))),
-                          ],
+                    // drag handle
+                    Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: _P.b100,
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: _getStatusColor(_predictionData!['status_color']).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                          child: Text(
-                            _predictionData!['congestion_level'].toUpperCase(),
-                            style: TextStyle(color: _getStatusColor(_predictionData!['status_color']), fontSize: 10, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                    const SizedBox(height: 25),
-                    const Divider(height: 1),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _buildMiniInfo(Icons.route_outlined, "Jarak", _predictionData!['distance']),
-                        _buildMiniInfo(Icons.cloud_queue_rounded, "Cuaca", _predictionData!['prediction_factors']['weather']),
-                        _buildMiniInfo(Icons.timer_outlined, "Delay", _predictionData!['delay']),
-                      ],
-                    ),
-                    const SizedBox(height: 30),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: primaryColor,
-                          side: BorderSide(color: primaryColor, width: 1.5),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+
+                    // ── Header gradient banner ──────────────────
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [_P.b600, _P.b800, _P.dark],
+                          stops: [0.0, 0.55, 1.0],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                        onPressed: _resetScreen,
-                        icon: const Icon(Icons.refresh_rounded, size: 20),
-                        label: const Text("CARI RUTE LAIN", style: TextStyle(fontWeight: FontWeight.bold)),
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _P.b600.withOpacity(0.30),
+                            blurRadius: 20,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'ESTIMASI PERJALANAN',
+                                style: TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _predictionData!['predicted_time'],
+                                style: const TextStyle(
+                                  fontSize: 34,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                  height: 1.0,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.14),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.20),
+                              ),
+                            ),
+                            child: Text(
+                              _predictionData!['congestion_level']
+                                  .toString()
+                                  .toUpperCase(),
+                              style: TextStyle(
+                                color: _getStatusColor(
+                                  _predictionData!['status_color'],
+                                ),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // ── 3 stat cards ──────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                      child: Row(
+                        children: [
+                          _buildStatCard(
+                            Icons.route_outlined,
+                            "Jarak",
+                            _predictionData!['distance'],
+                            [_P.b50, _P.b100],
+                            _P.b500,
+                          ),
+                          const SizedBox(width: 10),
+                          _buildStatCard(
+                            Icons.cloud_queue_rounded,
+                            "Cuaca",
+                            _predictionData!['prediction_factors']['weather'],
+                            [const Color(0xFFE0F2FE), const Color(0xFFBAE6FD)],
+                            const Color(0xFF0EA5E9),
+                          ),
+                          const SizedBox(width: 10),
+                          _buildStatCard(
+                            Icons.timer_outlined,
+                            "Delay",
+                            _predictionData!['delay'],
+                            [const Color(0xFFFFF7ED), const Color(0xFFFED7AA)],
+                            const Color(0xFFEA580C),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // ── Reset button ──────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 14, 20, 30),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _P.b600,
+                            side: const BorderSide(color: _P.b200, width: 1.5),
+                            backgroundColor: _P.b50,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          onPressed: _resetScreen,
+                          icon: const Icon(
+                            Icons.refresh_rounded,
+                            size: 18,
+                            color: _P.b600,
+                          ),
+                          label: const Text(
+                            "CARI RUTE LAIN",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 13,
+                              color: _P.b600,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -357,26 +667,79 @@ class _TravelTimePredictionScreenState
     );
   }
 
-  Widget _buildMiniInfo(IconData icon, String label, String value) {
+  Widget _buildStatCard(
+    IconData icon,
+    String label,
+    String value,
+    List<Color> bgColors,
+    Color iconColor,
+  ) {
     return Expanded(
-      child: Column(
-        children: [
-          Icon(icon, color: primaryColor.withOpacity(0.6), size: 22),
-          const SizedBox(height: 6),
-          Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 10, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 2),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF263238))),
-        ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        decoration: BoxDecoration(
+          color: _P.card,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _P.b100, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: _P.b500.withOpacity(0.06),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: bgColors,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: iconColor, size: 18),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: _P.ink3,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              value,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+                color: _P.ink,
+                height: 1.2,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Color _getStatusColor(String colorName) {
     switch (colorName) {
-      case 'red': return const Color(0xFFD32F2F);
-      case 'orange': return const Color(0xFFF57C00);
-      case 'blue': return const Color(0xFF1976D2);
-      default: return const Color(0xFF388E3C);
+      case 'red':
+        return const Color(0xFFDC2626);
+      case 'orange':
+        return const Color(0xFFEA580C);
+      case 'blue':
+        return const Color(0xFF2563EB);
+      default:
+        return const Color(0xFF16A34A);
     }
   }
 }
