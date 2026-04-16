@@ -1,12 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 
 // ─────────────────────────────────────────────
-// Palette
+// Palette (Konsisten dengan Tema Medan Flow)
 // ─────────────────────────────────────────────
 class _P {
   static const b50 = Color(0xFFEFF6FF);
@@ -44,7 +45,7 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
     _fetchHeatmapData();
   }
 
-  // ── Data (tidak diubah) ──────────────────────────────────────
+  // ── Logic Data (Integrasi Backend) ──────────────────────────
   Future<void> _fetchHeatmapData() async {
     setState(() => _isLoading = true);
     try {
@@ -112,7 +113,7 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // ── 1. Peta ────────────────────────────────────────
+          // ── 1. Peta (MENGGUNAKAN MAPBOX TRAFFIC API) ────────
           FlutterMap(
             mapController: _mapController,
             options: const MapOptions(
@@ -120,8 +121,13 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
               initialZoom: 13,
             ),
             children: [
+              // INTEGRASI MAPBOX LAYER
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: 'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
+                additionalOptions: const {
+                  'accessToken': ApiService.mapboxToken,
+                  'id': ApiService.mapboxTrafficStyle,
+                },
                 userAgentPackageName: 'com.medanflow.app',
               ),
               CircleLayer(circles: _circles),
@@ -185,7 +191,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
       ),
       child: Row(
         children: [
-          // Back button
           GestureDetector(
             onTap: () => Navigator.pop(context),
             child: Container(
@@ -233,7 +238,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
               ],
             ),
           ),
-          // Refresh button
           GestureDetector(
             onTap: _fetchHeatmapData,
             child: Container(
@@ -435,7 +439,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ── Title row ──────────────────────────────────────
           Row(
             children: [
               Container(
@@ -476,7 +479,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
                   ],
                 ),
               ),
-              // Menit badge
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 13,
@@ -508,12 +510,9 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
               ),
             ],
           ),
-
           const SizedBox(height: 14),
           Container(height: 1, color: _P.b100),
           const SizedBox(height: 10),
-
-          // ── Slider ─────────────────────────────────────────
           SliderTheme(
             data: SliderTheme.of(context).copyWith(
               activeTrackColor: _P.b500,
@@ -532,8 +531,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
               onChangeEnd: (_) => _fetchHeatmapData(),
             ),
           ),
-
-          // ── Label ──────────────────────────────────────────
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 4),
             child: Row(
