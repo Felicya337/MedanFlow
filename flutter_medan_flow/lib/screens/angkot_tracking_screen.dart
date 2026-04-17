@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart'; // Wajib untuk deteksi lokasi asli
 import '../services/api_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,21 +45,27 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
   Timer? _timer;
   bool _isLoading = true;
   List<dynamic> _angkotList = [];
+  LatLng _initialCameraCenter = const LatLng(3.5952, 98.6722); // Default Medan jika GPS gagal
 
-  // ── Animasi Orb (Visual Pulse pada Marker) ──────────────────────────────────
+  // ── Animation ────────────────────────────────────────────────
   late AnimationController _orbCtrl;
 
   @override
   void initState() {
     super.initState();
-    _fetchData();
-    // Refresh posisi angkot setiap 10 detik agar tetap sinkron dengan GPS asli Driver
-    _timer = Timer.periodic(const Duration(seconds: 10), (t) => _fetchData());
+    _initTracking();
     
     _orbCtrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
+  }
+
+  // Gabungan inisialisasi data dan lokasi user
+  Future<void> _initTracking() async {
+    await _determineUserPosition(); // Cari lokasi user dulu (Toba atau mana pun)
+    _fetchData(); // Ambil data angkot
+    _timer = Timer.periodic(const Duration(seconds: 10), (t) => _fetchData());
   }
 
   @override
@@ -68,7 +75,37 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     super.dispose();
   }
 
-  // ── Logika Pengambilan Data ────────────────────────────────────────────────
+  // FUNGSI UTAMA: Mendeteksi Lokasi Asli Tanpa Cheat
+  Future<void> _determineUserPosition() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return;
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return;
+    }
+
+    if (permission == LocationPermission.deniedForever) return;
+
+    // Ambil posisi asli perangkat
+    Position position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high
+    );
+
+    if (mounted) {
+      setState(() {
+        _initialCameraCenter = LatLng(position.latitude, position.longitude);
+      });
+      // Gerakkan peta ke lokasi user saat ini secara otomatis
+      _mapController.move(_initialCameraCenter, 14.0);
+    }
+  }
+
+  // ── Logika Pengambilan Data Angkot ────────────────────────────────────────
   Future<void> _fetchData() async {
     try {
       final data = await _apiService.getActiveAngkots();
@@ -108,7 +145,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                 return Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Label ID Angkot melayang di atas icon
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
@@ -123,7 +159,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                       ),
                     ),
                     const SizedBox(height: 2),
-                    // Visual Pulse (Orb) di belakang icon bus
                     Stack(
                       alignment: Alignment.center,
                       children: [
@@ -159,9 +194,9 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // BUILD UTAMA
-  // ══════════════════════════════════════════════════════════════════════════
+  void _zoomIn() => _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1);
+  void _zoomOut() => _mapController.move(_mapController.camera.center, _mapController.camera.zoom - 1);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -171,8 +206,8 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
           // 1. LAYER PETA (MAPBOX TRAFFIC) ────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
-            options: const MapOptions(
-              initialCenter: LatLng(3.5952, 98.6722),
+            options: MapOptions(
+              initialCenter: _initialCameraCenter,
               initialZoom: 13,
             ),
             children: [
@@ -191,11 +226,11 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
             top: MediaQuery.of(context).size.height * 0.35,
             child: Column(
               children: [
-                _buildMapActionBtn(Icons.add_rounded, () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1)),
+                _buildMapActionBtn(Icons.add_rounded, _zoomIn),
                 const SizedBox(height: 8),
-                _buildMapActionBtn(Icons.remove_rounded, () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom - 1)),
+                _buildMapActionBtn(Icons.remove_rounded, _zoomOut),
                 const SizedBox(height: 8),
-                _buildMapActionBtn(Icons.my_location_rounded, () => _mapController.move(const LatLng(3.5952, 98.6722), 13), accent: true),
+                _buildMapActionBtn(Icons.my_location_rounded, _determineUserPosition, accent: true),
               ],
             ),
           ),
@@ -203,7 +238,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
           // 3. DRAGGABLE LIST PANEL ───────────────────────────────────────────
           _buildDraggableAngkotList(),
 
-          // 4. HEADER OVERLAY (Paling atas agar Tombol Back bisa ditekan) ──────
+          // 4. HEADER OVERLAY ────────────────────────────────────────────────
           Positioned(top: 0, left: 0, right: 0, child: _buildHeader()),
 
           // 5. LOADING OVERLAY ────────────────────────────────────────────────
@@ -217,7 +252,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Fungsi Widget Header ───────────────────────────────────────────────────
   Widget _buildHeader() {
     return SafeArea(
       child: Container(
@@ -252,7 +286,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                 children: [
                   const Text('Live Tracking Angkot', 
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -0.2)),
-                  Text('Sinkronisasi GPS setiap 10 detik', 
+                  Text('GPS Aktif - Lokasi Real-time', 
                     style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.6), fontWeight: FontWeight.w600)),
                 ],
               ),
@@ -279,7 +313,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Tombol Kontrol Peta ─────────────────────────────────────────────────────
   Widget _buildMapActionBtn(IconData icon, VoidCallback onTap, {bool accent = false}) {
     return Container(
       width: 44, height: 44,
@@ -297,7 +330,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Panel Draggable ────────────────────────────────────────────────────────
   Widget _buildDraggableAngkotList() {
     return DraggableScrollableSheet(
       initialChildSize: 0.25,
@@ -346,7 +378,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Card Unit Angkot ───────────────────────────────────────────────────────
   Widget _buildAngkotCard(dynamic angkot) {
     final isFull = angkot['crowd_status'] == 'Penuh';
     final accentColor = isFull ? const Color(0xFFDC2626) : _P.b600;
@@ -437,7 +468,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
           const Text('Tidak Ada Armada Aktif', 
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: _P.ink2)),
           const SizedBox(height: 4),
-          const Text('Belum ada driver yang sedang narik saat ini.', 
+          const Text('Gunakan tombol GPS untuk memusatkan peta ke lokasi Anda.', 
             style: TextStyle(fontSize: 12, color: _P.ink4, fontWeight: FontWeight.w600)),
         ],
       ),

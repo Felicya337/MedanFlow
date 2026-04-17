@@ -60,31 +60,29 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
   }
 
   Future<void> _determinePosition() async {
+    setState(() => _originController.text = "Mendeteksi GPS...");
+    
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
-      await Geolocator.requestPermission();
+      permission = await Geolocator.requestPermission();
     }
-    Position position = await Geolocator.getCurrentPosition();
+    
+    if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high
+      );
 
-    // Cheat Emulator (Medan) agar rute valid
-    position = Position(
-      latitude: 3.5952,
-      longitude: 98.6722,
-      timestamp: DateTime.now(),
-      accuracy: 1,
-      altitude: 1,
-      heading: 1,
-      speed: 1,
-      speedAccuracy: 1,
-      altitudeAccuracy: 1,
-      headingAccuracy: 1,
-    );
+      // --- KODE CHEAT MEDAN SUDAH DIHAPUS ---
 
-    setState(() {
-      _userPosition = position;
-      _originController.text = "Lokasi Saya (Medan)";
-      _mapController.move(LatLng(position.latitude, position.longitude), 14);
-    });
+      setState(() {
+        _userPosition = position;
+        _originController.text = "Lokasi Saya Saat Ini";
+        // Peta otomatis pindah ke lokasi asli Anda di Toba
+        _mapController.move(LatLng(position.latitude, position.longitude), 14);
+      });
+    } else {
+      setState(() => _originController.text = "Izin GPS Ditolak");
+    }
   }
 
   Future<void> _fetchSmartRoutes() async {
