@@ -5,9 +5,9 @@ import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_ti
 import 'package:latlong2/latlong.dart';
 import '../services/api_service.dart';
 
-// ─────────────────────────────────────────────
-// Palette
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Palette & Styling (Konsisten dengan Tema Profesional Medan Flow)
+// ─────────────────────────────────────────────────────────────────────────────
 class _P {
   static const b50 = Color(0xFFEFF6FF);
   static const b100 = Color(0xFFDBEAFE);
@@ -20,6 +20,7 @@ class _P {
   static const b800 = Color(0xFF1E40AF);
   static const card = Colors.white;
   static const ink = Color(0xFF0F172A);
+  static const ink2 = Color(0xFF1E293B); // ← ditambahkan (sebelumnya hilang)
   static const ink3 = Color(0xFF64748B);
   static const ink4 = Color(0xFF94A3B8);
   static const dark = Color(0xFF0F2878);
@@ -34,6 +35,7 @@ class AngkotTrackingScreen extends StatefulWidget {
 
 class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     with SingleTickerProviderStateMixin {
+  // ── Kontroler & Data ───────────────────────────────────────────────────────
   final ApiService _apiService = ApiService();
   final MapController _mapController = MapController();
 
@@ -43,16 +45,18 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
   bool _mapReady = false;
   List<dynamic> _angkotList = [];
 
+  // ── Animasi Orb (Visual Pulse pada Marker) ─────────────────────────────────
   late AnimationController _orbCtrl;
 
   @override
   void initState() {
     super.initState();
     _fetchData();
+    // Refresh posisi angkot setiap 10 detik agar tetap sinkron dengan GPS asli Driver
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchData());
     _orbCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 10),
+      duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
   }
 
@@ -63,7 +67,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     super.dispose();
   }
 
-  // ── Data ─────────────────────────────────────────────────────
+  // ── Logika Pengambilan Data ────────────────────────────────────────────────
   Future<void> _fetchData() async {
     try {
       final data = await _apiService.getActiveAngkots();
@@ -75,11 +79,12 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
         _updateMarkers(data);
       }
     } catch (e) {
-      debugPrint('OSM Tracking Error: $e');
+      debugPrint('Tracking Error: $e');
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  // ── Pembuatan Marker Berwarna Dinamis ──────────────────────────────────────
   void _updateMarkers(List<dynamic> data) {
     final newMarkers = <Marker>[];
     for (final angkot in data) {
@@ -92,49 +97,67 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
             double.parse(angkot['latitude'].toString()),
             double.parse(angkot['longitude'].toString()),
           ),
-          width: 72,
-          height: 72,
+          width: 80,
+          height: 80,
           child: GestureDetector(
             onTap: () => _focusOnAngkot(angkot),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: statusColor, width: 1.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: statusColor.withOpacity(0.25),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
+            child: AnimatedBuilder(
+              animation: _orbCtrl,
+              builder: (context, child) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Label ID Angkot melayang di atas icon
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
                       ),
-                    ],
-                  ),
-                  child: Text(
-                    angkot['angkot_number'],
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
-                      color: statusColor,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: statusColor, width: 1),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        angkot['angkot_number'],
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          color: statusColor,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Icon(
-                  Icons.directions_bus_rounded,
-                  color: statusColor,
-                  size: 30,
-                  shadows: [
-                    Shadow(color: statusColor.withOpacity(0.35), blurRadius: 8),
+                    const SizedBox(height: 2),
+                    // Visual Pulse (Orb) di belakang icon bus
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 30 + (15 * _orbCtrl.value),
+                          height: 30 + (15 * _orbCtrl.value),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: statusColor.withOpacity(
+                              0.2 * (1 - _orbCtrl.value),
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          Icons.directions_bus_rounded,
+                          color: statusColor,
+                          size: 28,
+                        ),
+                      ],
+                    ),
                   ],
-                ),
-              ],
+                );
+              },
             ),
           ),
         ),
@@ -153,45 +176,59 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  void _zoomIn() => _mapController.move(
-    _mapController.camera.center,
-    _mapController.camera.zoom + 1,
-  );
-
-  void _zoomOut() => _mapController.move(
-    _mapController.camera.center,
-    _mapController.camera.zoom - 1,
-  );
-
-  // ════════════════════════════════════════════════════════════
-  //  BUILD
-  // ════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  // BUILD UTAMA
+  // ══════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // ── 1. Map ─────────────────────────────────────────
+          // 1. LAYER PETA (OSM) ───────────────────────────────────────────────
           _buildMap(),
 
-          // ── 2. Skeleton overlay (shown until map is ready)
+          // 2. SKELETON OVERLAY (tampil hingga peta siap) ─────────────────────
           if (!_mapReady) _buildMapSkeleton(),
 
-          // ── 3. Header ──────────────────────────────────────
-          Positioned(top: 0, left: 0, right: 0, child: _buildHeader()),
-
-          // ── 4. Zoom controls ───────────────────────────────
+          // 3. ZOOM & MY LOCATION CONTROLS ────────────────────────────────────
           Positioned(
             right: 16,
-            top: MediaQuery.of(context).size.height * 0.28,
-            child: _buildZoomControls(),
+            top: MediaQuery.of(context).size.height * 0.35,
+            child: Column(
+              children: [
+                _buildMapActionBtn(
+                  Icons.add_rounded,
+                  () => _mapController.move(
+                    _mapController.camera.center,
+                    _mapController.camera.zoom + 1,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildMapActionBtn(
+                  Icons.remove_rounded,
+                  () => _mapController.move(
+                    _mapController.camera.center,
+                    _mapController.camera.zoom - 1,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildMapActionBtn(
+                  Icons.my_location_rounded,
+                  () => _mapController.move(const LatLng(3.5952, 98.6722), 13),
+                  accent: true,
+                ),
+              ],
+            ),
           ),
 
-          // ── 5. Draggable list ──────────────────────────────
+          // 4. DRAGGABLE LIST PANEL ───────────────────────────────────────────
           _buildDraggableAngkotList(),
 
-          // ── 6. Subtle loading spinner after map ready
+          // 5. HEADER OVERLAY (Paling atas agar Tombol Back bisa ditekan) ──────
+          Positioned(top: 0, left: 0, right: 0, child: _buildHeader()),
+
+          // 6. SUBTLE LOADING SPINNER (setelah peta siap) ─────────────────────
           if (_isLoading && _mapReady)
             Positioned(
               top: MediaQuery.of(context).padding.top + 100,
@@ -220,7 +257,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Map ──────────────────────────────────────────────────────
+  // ── Map ────────────────────────────────────────────────────────────────────
   Widget _buildMap() {
     return FlutterMap(
       mapController: _mapController,
@@ -230,37 +267,23 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all,
         ),
-        // FIX: Langsung set _mapReady tanpa Future.delayed
-        // sehingga peta muncul secepat mungkin
         onMapReady: () {
           if (mounted) setState(() => _mapReady = true);
         },
       ),
       children: [
-        // ── Tile layer ──────────────────────────────────────
         TileLayer(
           urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
           subdomains: const ['a', 'b', 'c'],
           userAgentPackageName: 'com.medanflow.app',
-
-          // FIX: CancellableTileProvider dari versi ^3.0.0
           tileProvider: CancellableNetworkTileProvider(),
-
           maxNativeZoom: 19,
-
-          // FIX: panBuffer 0 = tidak pre-fetch tile di luar viewport
-          // ini yang bikin peta lebih cepat muncul
           panBuffer: 0,
-
-          // Simpan tile yang sudah dimuat agar tidak re-fetch saat pan kembali
           keepBuffer: 2,
-
-          // Fade ringan agar tidak terasa "pop"
           tileDisplay: const TileDisplay.fadeIn(
             duration: Duration(milliseconds: 150),
             startOpacity: 0.6,
           ),
-
           errorTileCallback: (tile, error, stackTrace) {
             debugPrint('Tile error: $error');
           },
@@ -270,7 +293,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Map Skeleton ─────────────────────────────────────────────
+  // ── Map Skeleton ───────────────────────────────────────────────────────────
   Widget _buildMapSkeleton() {
     return Positioned.fill(
       child: AnimatedBuilder(
@@ -340,182 +363,151 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Header ───────────────────────────────────────────────────
+  // ── Header ─────────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return SafeArea(
-      bottom: false,
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [_P.b600, _P.b800, _P.dark],
-            stops: [0.0, 0.55, 1.0],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(22),
           boxShadow: [
             BoxShadow(
-              color: _P.b600.withOpacity(0.35),
+              color: _P.b600.withOpacity(0.3),
               blurRadius: 20,
               offset: const Offset(0, 6),
             ),
           ],
         ),
-        child: Stack(
+        child: Row(
           children: [
-            Positioned.fill(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(22),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: const Alignment(0.85, -0.75),
-                      radius: 1.1,
-                      colors: [
-                        Colors.white.withOpacity(0.08),
-                        Colors.transparent,
-                      ],
-                    ),
+            Material(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => Navigator.pop(context),
+                child: const SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    size: 16,
+                    color: Colors.white,
                   ),
                 ),
               ),
             ),
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      size: 15,
+            const SizedBox(width: 15),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Live Tracking Angkot',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
                       color: Colors.white,
+                      letterSpacing: -0.2,
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Live Tracking Angkot',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                          letterSpacing: -0.3,
-                        ),
-                      ),
-                      Text(
-                        'Update otomatis setiap 10 detik',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: Colors.white.withOpacity(0.60),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    'Sinkronisasi GPS setiap 10 detik',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: Colors.white.withOpacity(0.6),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF4ADE80),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      const Text(
-                        'LIVE',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
+            _buildLiveBadge(),
           ],
         ),
       ),
     );
   }
 
-  // ── Zoom Controls ────────────────────────────────────────────
-  Widget _buildZoomControls() {
-    return Column(
-      children: [
-        _mapBtn(Icons.add_rounded, _zoomIn),
-        const SizedBox(height: 8),
-        _mapBtn(Icons.remove_rounded, _zoomOut),
-        const SizedBox(height: 8),
-        _mapBtn(
-          Icons.my_location_rounded,
-          () => _mapController.move(const LatLng(3.5952, 98.6722), 13),
-        ),
-      ],
-    );
-  }
-
-  Widget _mapBtn(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _P.b100, width: 1.5),
-          boxShadow: [
-            BoxShadow(
-              color: _P.b500.withOpacity(0.12),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
+  Widget _buildLiveBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              color: Color(0xFF4ADE80),
+              shape: BoxShape.circle,
             ),
-          ],
-        ),
-        child: Icon(icon, color: _P.b600, size: 20),
+          ),
+          const SizedBox(width: 5),
+          const Text(
+            'LIVE',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // ── Draggable Panel ──────────────────────────────────────────
+  // ── Tombol Kontrol Peta ────────────────────────────────────────────────────
+  Widget _buildMapActionBtn(
+    IconData icon,
+    VoidCallback onTap, {
+    bool accent = false,
+  }) {
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        color: accent ? _P.b600 : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _P.b100, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: _P.b500.withOpacity(0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        icon: Icon(icon, color: accent ? Colors.white : _P.b600, size: 20),
+        onPressed: onTap,
+      ),
+    );
+  }
+
+  // ── Panel Draggable ────────────────────────────────────────────────────────
   Widget _buildDraggableAngkotList() {
     return DraggableScrollableSheet(
       initialChildSize: 0.25,
       minChildSize: 0.10,
-      maxChildSize: 0.70,
+      maxChildSize: 0.75,
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: _P.card,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
             boxShadow: [
               BoxShadow(
                 color: Color(0x1A1D4ED8),
@@ -536,39 +528,18 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 15),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [_P.b500, _P.b700],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(
-                            Icons.directions_bus_rounded,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        const Text(
-                          'Armada Aktif',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
-                            color: _P.ink,
-                          ),
-                        ),
-                      ],
+                    const Text(
+                      'ARMADA AKTIF',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        color: _P.ink,
+                        letterSpacing: 0.8,
+                      ),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -578,12 +549,12 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                       decoration: BoxDecoration(
                         color: _P.b50,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: _P.b200, width: 1),
+                        border: Border.all(color: _P.b100),
                       ),
                       child: Text(
                         '${_angkotList.length} Unit',
                         style: const TextStyle(
-                          fontSize: 12,
+                          fontSize: 11,
                           fontWeight: FontWeight.w800,
                           color: _P.b600,
                         ),
@@ -600,7 +571,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                     : ListView.builder(
                         controller: scrollController,
                         physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                        padding: const EdgeInsets.fromLTRB(20, 15, 20, 30),
                         itemCount: _angkotList.length,
                         itemBuilder: (context, index) =>
                             _buildAngkotCard(_angkotList[index]),
@@ -613,11 +584,11 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Angkot Card ──────────────────────────────────────────────
+  // ── Card Unit Angkot ───────────────────────────────────────────────────────
   Widget _buildAngkotCard(dynamic angkot) {
     final isFull = angkot['crowd_status'] == 'Penuh';
     final accentColor = isFull ? const Color(0xFFDC2626) : _P.b600;
-    final accentBg = isFull ? const Color(0xFFFEF2F2) : _P.b50;
+    final accentBg = isFull ? const Color(0xFFFEF2F2) : _P.b50; // ← ditambahkan
 
     return GestureDetector(
       onTap: () => _focusOnAngkot(angkot),
@@ -682,7 +653,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      _statusBadge(angkot['crowd_status']),
+                      _buildStatusBadge(angkot['crowd_status']),
                       const SizedBox(width: 8),
                       const Icon(
                         Icons.timer_outlined,
@@ -695,7 +666,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w700,
-                          color: _P.ink3,
+                          color: _P.ink2,
                         ),
                       ),
                     ],
@@ -722,7 +693,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  Widget _statusBadge(String status) {
+  Widget _buildStatusBadge(String status) {
     final isFull = status == 'Penuh';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -731,14 +702,13 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isFull ? const Color(0xFFFECACA) : const Color(0xFF86EFAC),
-          width: 1,
         ),
       ),
       child: Text(
-        status,
+        status.toUpperCase(),
         style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
+          fontSize: 9,
+          fontWeight: FontWeight.w900,
           color: isFull ? const Color(0xFFDC2626) : const Color(0xFF15803D),
         ),
       ),
@@ -755,27 +725,26 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
             height: 72,
             decoration: BoxDecoration(
               color: _P.b50,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: _P.b100, width: 1.5),
+              borderRadius: BorderRadius.circular(24),
             ),
             child: const Icon(
-              Icons.directions_bus_outlined,
-              size: 34,
+              Icons.bus_alert_rounded,
+              size: 36,
               color: _P.b300,
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 15),
           const Text(
-            'Tidak ada armada aktif',
+            'Tidak Ada Armada Aktif',
             style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: _P.ink3,
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+              color: _P.ink2,
             ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 4),
           const Text(
-            'Tidak ada angkot yang beroperasi saat ini',
+            'Belum ada driver yang sedang narik saat ini.',
             style: TextStyle(
               fontSize: 12,
               color: _P.ink4,

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart'; // Wajib untuk ambil token
 import '../services/api_service.dart';
 
 // ─────────────────────────────────────────────
@@ -35,7 +36,7 @@ class AdminAnalyticsScreen extends StatefulWidget {
 
 class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
     with SingleTickerProviderStateMixin {
-  // ── Data (unchanged) ─────────────────────────────────────────
+  // ── Data ─────────────────────────────────────────
   bool _isLoading = true;
   List<dynamic> _chartData = [];
 
@@ -58,22 +59,47 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
     super.dispose();
   }
 
-  // ── Logic (unchanged) ────────────────────────────────────────
+  // ── Logic (FIXED: Added Token & Error Handling) ────────────────────────
   Future<void> _fetchAnalytics() async {
+    setState(() => _isLoading = true);
     try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? token = prefs.getString('token');
+
       final response = await http.get(
         Uri.parse('${ApiService().baseUrl}/admin/stats'),
+        headers: {
+          'Authorization': 'Bearer $token', // Kirim token agar tidak 401
+          'Accept': 'application/json',
+        },
       );
+
       if (response.statusCode == 200) {
+        final decodedData = jsonDecode(response.body);
         setState(() {
-          _chartData = jsonDecode(response.body)['chart_data'];
-          _isLoading = false;
+          _chartData = decodedData['chart_data'] ?? [];
         });
+      } else {
+        debugPrint('Server Error: ${response.statusCode}');
+        _showErrorSnackBar("Gagal mengambil data dari server");
       }
     } catch (e) {
       debugPrint('Analytics Error: $e');
+      _showErrorSnackBar("Koneksi bermasalah: Pastikan server jalan");
+    } finally {
+      // Memastikan spinner berhenti meski terjadi error
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   // ════════════════════════════════════════════════════════════
@@ -230,37 +256,11 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
                   ],
                 ),
               ),
-              // AI badge
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.auto_awesome_rounded,
-                      color: Colors.white70,
-                      size: 13,
-                    ),
-                    SizedBox(width: 4),
-                    Text(
-                      'AI',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              // Refresh icon
+              IconButton(
+                icon: const Icon(Icons.refresh_rounded, color: Colors.white70, size: 20),
+                onPressed: _fetchAnalytics,
+              )
             ],
           ),
         ],
@@ -271,8 +271,15 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
   // ── Body ─────────────────────────────────────────────────────
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(color: _P.b600, strokeWidth: 2.5),
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: _P.b600, strokeWidth: 2.5),
+            const SizedBox(height: 16),
+            Text("Sinkronisasi data...", style: TextStyle(color: _P.ink3, fontSize: 13, fontWeight: FontWeight.bold)),
+          ],
+        ),
       );
     }
 
@@ -323,10 +330,16 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
 
   // ── Chart Card ───────────────────────────────────────────────
   Widget _buildChartCard() {
-    // Find max value to normalize bar heights
-    final maxVal = _chartData.isEmpty
-        ? 100.0
-        : _chartData
+    if (_chartData.isEmpty) {
+      return Container(
+        height: 100,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: _P.card, borderRadius: BorderRadius.circular(20)),
+        child: Text("Data statistik belum tersedia", style: TextStyle(color: _P.ink4)),
+      );
+    }
+
+    final maxVal = _chartData
               .map((d) => (d['value'] as num).toDouble())
               .reduce(math.max);
 
@@ -347,7 +360,6 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Chart legend row
           Row(
             children: [
               Container(
@@ -370,7 +382,6 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
             ],
           ),
           const SizedBox(height: 16),
-          // Bar chart
           SizedBox(
             height: 180,
             child: Row(
@@ -408,14 +419,6 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
                           end: Alignment.bottomCenter,
                         ),
                         borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: (isHigh ? const Color(0xFFDC2626) : _P.b500)
-                                .withOpacity(0.22),
-                            blurRadius: 6,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -462,7 +465,6 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
       ),
       child: Row(
         children: [
-          // Icon
           Container(
             width: 48,
             height: 48,
@@ -477,7 +479,6 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
             child: Icon(icon, color: iconColor, size: 22),
           ),
           const SizedBox(width: 14),
-          // Text
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

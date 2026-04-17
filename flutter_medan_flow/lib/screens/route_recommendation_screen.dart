@@ -8,7 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import '../services/api_service.dart';
 
 // ─────────────────────────────────────────────
-// Palette (sama persis dengan LandingPage)
+// Palette (Profesional Medan Flow)
 // ─────────────────────────────────────────────
 class _P {
   static const b50 = Color(0xFFEFF6FF);
@@ -26,7 +26,6 @@ class _P {
   static const ink2 = Color(0xFF334155);
   static const ink3 = Color(0xFF64748B);
   static const ink4 = Color(0xFF94A3B8);
-  static const dark = Color(0xFF0F2878);
 }
 
 class RouteRecommendationScreen extends StatefulWidget {
@@ -40,7 +39,7 @@ class RouteRecommendationScreen extends StatefulWidget {
 class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
   final ApiService _apiService = ApiService();
 
-  // ── FIX 1: Gunakan Completer agar move() hanya dipanggil setelah map siap ──
+  // Gunakan Completer agar move() hanya dipanggil setelah map siap
   final Completer<MapController> _mapControllerCompleter = Completer();
   MapController? _mapController;
 
@@ -48,13 +47,13 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
   bool _isLoading = false;
 
   final TextEditingController _originController = TextEditingController(
-    text: "Mendeteksi lokasi...",
+    text: 'Mendeteksi lokasi...',
   );
   final TextEditingController _destController = TextEditingController(
-    text: "Pinang Baris",
+    text: 'Pinang Baris',
   );
 
-  // ── FIX 2: Posisi default Medan langsung di sini, tidak perlu tunggu GPS ──
+  // Posisi default Medan langsung di sini, tidak perlu tunggu GPS
   static const LatLng _defaultCenter = LatLng(3.5952, 98.6722);
   Position? _userPosition;
   List<LatLng> _currentPolyline = [];
@@ -63,11 +62,10 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
   @override
   void initState() {
     super.initState();
-    // Langsung set posisi tanpa async/await di initState
     _setDefaultPosition();
   }
 
-  /// Set posisi Medan secara synchronous supaya marker langsung muncul
+  // Set posisi Medan secara synchronous supaya marker langsung muncul
   void _setDefaultPosition() {
     final position = Position(
       latitude: _defaultCenter.latitude,
@@ -83,10 +81,10 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
     );
     // Set state sebelum build → marker langsung ada saat peta muncul
     _userPosition = position;
-    _originController.text = "Lokasi Saya (Medan)";
+    _originController.text = 'Lokasi Saya (Medan)';
   }
 
-  /// Dipanggil setelah map siap (dari onMapReady)
+  // Dipanggil setelah map siap (dari tombol my_location atau onMapReady)
   Future<void> _determinePosition() async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
@@ -110,14 +108,14 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
       if (!mounted) return;
       setState(() {
         _userPosition = position;
-        _originController.text = "Lokasi Saya (Medan)";
+        _originController.text = 'Lokasi Saya (Medan)';
       });
 
-      // FIX 3: Pakai safe move via completer
+      // Safe move via completer
       final ctrl = await _mapControllerCompleter.future;
       ctrl.move(LatLng(position.latitude, position.longitude), 14);
     } catch (e) {
-      debugPrint("GPS error: $e");
+      debugPrint('GPS error: $e');
     }
   }
 
@@ -128,10 +126,10 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
       _selectedRouteIndex = null;
     });
     try {
-      String url = "${ApiService().baseUrl}/recommendations";
+      String url = '${_apiService.baseUrl}/recommendations';
       if (_userPosition != null) {
         url +=
-            "?lat=${_userPosition!.latitude}&lng=${_userPosition!.longitude}";
+            '?lat=${_userPosition!.latitude}&lng=${_userPosition!.longitude}';
       }
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
@@ -146,7 +144,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
         }
       }
     } catch (e) {
-      debugPrint("Error: $e");
+      debugPrint('Error: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -167,13 +165,16 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
     }
   }
 
-  // ── FIX 4: Safe move helper ───────────────────────────────────────────────
+  // Safe move helper
   void _safeMove(LatLng center, double zoom) {
     if (_mapControllerCompleter.isCompleted && _mapController != null) {
       _mapController!.move(center, zoom);
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BUILD UTAMA
+  // ══════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -189,13 +190,6 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
               color: _P.card,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: _P.b100, width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: _P.b500.withOpacity(0.10),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
             ),
             child: IconButton(
               icon: const Icon(
@@ -207,51 +201,36 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
             ),
           ),
         ),
-        title: ShaderMask(
-          shaderCallback: (b) => const LinearGradient(
-            colors: [_P.b600, Color(0xFF06B6D4)],
-          ).createShader(b),
-          child: const Text(
-            'Navigasi Pintar',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
-              letterSpacing: -0.3,
-            ),
+        title: const Text(
+          'Navigasi Pintar',
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            color: _P.ink,
+            fontSize: 18,
           ),
         ),
         centerTitle: true,
       ),
       body: Stack(
         children: [
-          // ── PETA ──────────────────────────────────────────────
+          // ── Peta ──────────────────────────────────────────────────────────
           FlutterMap(
             options: MapOptions(
-              // FIX 5: initialCenter & initialZoom langsung pakai default,
-              // tidak ada async di sini → peta langsung render
               initialCenter: _defaultCenter,
               initialZoom: 14,
-              // FIX 6: onMapReady menggantikan pola MapController lama
               onMapReady: () {
-                // Resolve completer sehingga _mapController siap dipakai
                 if (!_mapControllerCompleter.isCompleted) {
                   _mapControllerCompleter.complete(_mapController);
                 }
               },
             ),
-            // FIX 7: Pasang controller via MapOptions bukan konstruktor lama
             children: [
-              // FIX 8: Hapus @2x agar tile lebih kecil & cepat dimuat;
-              //         ganti retina=true dengan retina=false (default)
               TileLayer(
+                // Tanpa @2x agar tile lebih kecil & cepat dimuat
                 urlTemplate:
                     'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}?access_token=${ApiService.mapboxToken}',
                 userAgentPackageName: 'com.medanflow.app',
-                // FIX 9: Aktifkan keep alive & beri maxNativeZoom agar
-                //         flutter_map tidak minta tile resolusi terlalu tinggi
                 maxNativeZoom: 18,
-                // FIX 10: Cache tile di memory supaya pan/zoom lebih smooth
                 keepBuffer: 4,
               ),
               PolylineLayer(
@@ -282,9 +261,8 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                           color: _P.b600,
                           boxShadow: [
                             BoxShadow(
-                              color: _P.b600.withOpacity(0.40),
+                              color: _P.b600.withOpacity(0.4),
                               blurRadius: 10,
-                              offset: const Offset(0, 3),
                             ),
                           ],
                         ),
@@ -300,7 +278,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
             ],
           ),
 
-          // ── SEARCH CARD ────────────────────────────────────────
+          // ── Search Card ───────────────────────────────────────────────────
           Positioned(
             top: MediaQuery.of(context).padding.top + 66,
             left: 20,
@@ -310,90 +288,46 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
               decoration: BoxDecoration(
                 color: _P.card,
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: _P.b100, width: 1.5),
                 boxShadow: [
-                  BoxShadow(
-                    color: _P.b500.withOpacity(0.10),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
-                  ),
+                  BoxShadow(color: _P.b500.withOpacity(0.1), blurRadius: 16),
                 ],
               ),
               child: Column(
                 children: [
                   _buildSearchInput(
                     Icons.my_location_rounded,
-                    "Asal",
+                    'Asal',
                     _originController,
                     _P.b600,
-                    [_P.b50, _P.b100],
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(38, 6, 0, 6),
-                    child: Row(
-                      children: [
-                        Container(width: 1.5, height: 18, color: _P.b200),
-                      ],
-                    ),
-                  ),
+                  const Divider(height: 24),
                   _buildSearchInput(
                     Icons.flag_rounded,
-                    "Tujuan",
+                    'Tujuan',
                     _destController,
-                    const Color(0xFFDC2626),
-                    [const Color(0xFFFFF1F2), const Color(0xFFFFE4E6)],
+                    Colors.redAccent,
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
                     height: 52,
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : _fetchSmartRoutes,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
+                        backgroundColor: _P.b600,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        padding: EdgeInsets.zero,
                       ),
-                      child: Ink(
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [_P.b500, _P.b700],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _P.b600.withOpacity(0.35),
-                              blurRadius: 14,
-                              offset: const Offset(0, 4),
+                      child: _isLoading
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Text(
+                              'ANALISIS JALUR TERCEPAT',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
-                          ],
-                        ),
-                        child: Center(
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2.5,
-                                  ),
-                                )
-                              : const Text(
-                                  "ANALISIS JALUR TERCEPAT",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                        ),
-                      ),
                     ),
                   ),
                 ],
@@ -401,7 +335,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
             ),
           ),
 
-          // ── ZOOM CONTROLS ──────────────────────────────────────
+          // ── Zoom Controls ─────────────────────────────────────────────────
           Positioned(
             right: 16,
             top: MediaQuery.of(context).size.height * 0.42,
@@ -432,12 +366,14 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
             ),
           ),
 
-          // ── DRAGGABLE RESULTS ──────────────────────────────────
+          // ── Draggable Results ─────────────────────────────────────────────
           _buildDraggableResults(),
         ],
       ),
     );
   }
+
+  // ── Widget Helpers ─────────────────────────────────────────────────────────
 
   Widget _buildMapActionBtn(
     IconData icon,
@@ -445,23 +381,13 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
     bool accent = false,
   }) {
     return Container(
-      width: 40,
-      height: 40,
       decoration: BoxDecoration(
         color: accent ? _P.b600 : _P.card,
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: accent ? _P.b500 : _P.b100, width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: _P.b500.withOpacity(accent ? 0.30 : 0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 5)],
       ),
       child: IconButton(
-        padding: EdgeInsets.zero,
-        icon: Icon(icon, color: accent ? Colors.white : _P.b600, size: 18),
+        icon: Icon(icon, color: accent ? Colors.white : _P.b600),
         onPressed: onTap,
       ),
     );
@@ -471,39 +397,21 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
     IconData icon,
     String hint,
     TextEditingController ctrl,
-    Color iconColor,
-    List<Color> bgColors,
+    Color color,
   ) {
     return Row(
       children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: bgColors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(11),
-          ),
-          child: Icon(icon, size: 16, color: iconColor),
-        ),
+        Icon(icon, size: 20, color: color),
         const SizedBox(width: 12),
         Expanded(
           child: TextField(
             controller: ctrl,
             readOnly: true,
-            style: const TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w700,
-              color: _P.ink,
-            ),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
             decoration: InputDecoration(
               isDense: true,
               border: InputBorder.none,
               hintText: hint,
-              hintStyle: const TextStyle(color: _P.ink4),
             ),
           ),
         ),
@@ -513,9 +421,9 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
 
   Widget _buildDraggableResults() {
     return DraggableScrollableSheet(
-      initialChildSize: 0.13,
-      minChildSize: 0.13,
-      maxChildSize: 0.68,
+      initialChildSize: 0.15,
+      minChildSize: 0.15,
+      maxChildSize: 0.7,
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
@@ -523,14 +431,15 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
             borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
             boxShadow: [
               BoxShadow(
-                color: Color(0x1A2563EB),
-                blurRadius: 32,
-                offset: Offset(0, -6),
+                color: Colors.black12,
+                blurRadius: 20,
+                offset: Offset(0, -5),
               ),
             ],
           ),
           child: Column(
             children: [
+              // Handle bar
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Container(
@@ -542,6 +451,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                   ),
                 ),
               ),
+              // Header
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
@@ -583,49 +493,45 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                 ),
               ),
               Container(height: 1, color: _P.b50),
+              // Content
               Expanded(
                 child: _recommendations.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 56,
-                              height: 56,
-                              decoration: BoxDecoration(
-                                color: _P.b50,
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: const Icon(
+                    ? SingleChildScrollView(
+                        controller: scrollController,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(height: 10),
+                              Icon(
                                 Icons.alt_route_rounded,
-                                color: _P.b400,
-                                size: 26,
+                                color: _P.b300,
+                                size: 40,
                               ),
-                            ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Cari rute di atas',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: _P.ink3,
-                                fontSize: 13,
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Cari rute di atas',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: _P.ink3,
+                                  fontSize: 13,
+                                ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 20),
+                            ],
+                          ),
                         ),
                       )
                     : ListView.builder(
                         controller: scrollController,
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
                         itemCount: _recommendations.length,
                         itemBuilder: (context, index) {
                           final item = _recommendations[index];
-                          final isSelected = _selectedRouteIndex == index;
-                          return GestureDetector(
-                            onTap: () =>
-                                _drawRoute(item['geometry'], index: index),
-                            child: _buildRouteCard(item, isSelected, index),
-                          );
+                          return _buildRouteCard(item, index);
                         },
                       ),
               ),
@@ -636,151 +542,102 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
     );
   }
 
-  Widget _buildRouteCard(
-    Map<String, dynamic> item,
-    bool isSelected,
-    int index,
-  ) {
-    final etaText = item['eta']?.toString().split(" ")[0] ?? "0";
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isSelected ? _P.b50 : _P.card,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isSelected ? _P.b400 : _P.b100,
-          width: isSelected ? 2 : 1.5,
+  Widget _buildRouteCard(Map<String, dynamic> item, int index) {
+    final isSelected = _selectedRouteIndex == index;
+    return GestureDetector(
+      onTap: () => _drawRoute(item['geometry'], index: index),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isSelected ? _P.b50 : _P.card,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: isSelected ? _P.b400 : _P.b100),
+          boxShadow: [
+            BoxShadow(
+              color: _P.b500.withOpacity(isSelected ? 0.12 : 0.05),
+              blurRadius: isSelected ? 14 : 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: _P.b500.withOpacity(isSelected ? 0.12 : 0.05),
-            blurRadius: isSelected ? 14 : 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              gradient: isSelected
-                  ? const LinearGradient(
-                      colors: [_P.b500, _P.b700],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    )
-                  : LinearGradient(
-                      colors: [_P.b50, _P.b100],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: isSelected
-                  ? [
-                      BoxShadow(
-                        color: _P.b600.withOpacity(0.30),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
+        child: Row(
+          children: [
+            // ETA badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                gradient: isSelected
+                    ? const LinearGradient(
+                        colors: [_P.b500, _P.b700],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : LinearGradient(
+                        colors: [_P.b50, _P.b100],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                    ]
-                  : [],
-            ),
-            child: Column(
-              children: [
-                Text(
-                  etaText,
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w900,
-                    color: isSelected ? Colors.white : _P.b600,
-                    height: 1.0,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: isSelected
+                    ? [
+                        BoxShadow(
+                          color: _P.b600.withOpacity(0.30),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    item['eta']?.split(' ')[0] ?? '0',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      color: isSelected ? Colors.white : _P.b600,
+                    ),
                   ),
-                ),
-                Text(
-                  'MENIT',
-                  style: TextStyle(
-                    fontSize: 8.5,
-                    fontWeight: FontWeight.w800,
-                    color: isSelected
-                        ? Colors.white.withOpacity(0.75)
-                        : _P.ink4,
-                    letterSpacing: 0.5,
+                  Text(
+                    'MENIT',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected
+                          ? Colors.white.withOpacity(0.75)
+                          : _P.ink4,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item['name'] ?? "Rute Medan",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
-                    color: _P.ink,
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item['name'] ?? 'Rute Medan',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF16A34A),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    const Text(
-                      "Optimasi Jalur AI",
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: _P.ink3,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.route_outlined, size: 13, color: _P.ink4),
-                    const SizedBox(width: 4),
-                    Text(
-                      item['distance']?.toString() ?? "-",
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: _P.ink3,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                  Text(
+                    item['distance']?.toString() ?? '-',
+                    style: const TextStyle(fontSize: 12, color: _P.ink3),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: isSelected ? _P.b600 : _P.b50,
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Icon(
+            Icon(
               Icons.directions_rounded,
-              color: isSelected ? Colors.white : _P.b400,
-              size: 16,
+              color: isSelected ? _P.b600 : _P.b400,
+              size: 24,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
