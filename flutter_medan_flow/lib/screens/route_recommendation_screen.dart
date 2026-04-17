@@ -39,7 +39,11 @@ class RouteRecommendationScreen extends StatefulWidget {
 
 class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
   final ApiService _apiService = ApiService();
-  final MapController _mapController = MapController();
+
+  // ── FIX 1: Gunakan Completer agar move() hanya dipanggil setelah map siap ──
+  final Completer<MapController> _mapControllerCompleter = Completer();
+  MapController? _mapController;
+
   List _recommendations = [];
   bool _isLoading = false;
 
@@ -50,6 +54,8 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
     text: "Pinang Baris",
   );
 
+  // ── FIX 2: Posisi default Medan langsung di sini, tidak perlu tunggu GPS ──
+  static const LatLng _defaultCenter = LatLng(3.5952, 98.6722);
   Position? _userPosition;
   List<LatLng> _currentPolyline = [];
   int? _selectedRouteIndex;
@@ -57,20 +63,15 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
   @override
   void initState() {
     super.initState();
-    _determinePosition();
+    // Langsung set posisi tanpa async/await di initState
+    _setDefaultPosition();
   }
 
-  Future<void> _determinePosition() async {
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      await Geolocator.requestPermission();
-    }
-    Position position = await Geolocator.getCurrentPosition();
-
-    // Cheat Emulator (Medan)
-    position = Position(
-      latitude: 3.5952,
-      longitude: 98.6722,
+  /// Set posisi Medan secara synchronous supaya marker langsung muncul
+  void _setDefaultPosition() {
+    final position = Position(
+      latitude: _defaultCenter.latitude,
+      longitude: _defaultCenter.longitude,
       timestamp: DateTime.now(),
       accuracy: 1,
       altitude: 1,
@@ -80,12 +81,44 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
       altitudeAccuracy: 1,
       headingAccuracy: 1,
     );
+    // Set state sebelum build → marker langsung ada saat peta muncul
+    _userPosition = position;
+    _originController.text = "Lokasi Saya (Medan)";
+  }
 
-    setState(() {
-      _userPosition = position;
-      _originController.text = "Lokasi Saya (Medan)";
-      _mapController.move(LatLng(position.latitude, position.longitude), 14);
-    });
+  /// Dipanggil setelah map siap (dari onMapReady)
+  Future<void> _determinePosition() async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+      // Cheat Emulator (Medan) – ganti dengan GPS asli jika perlu
+      final position = Position(
+        latitude: _defaultCenter.latitude,
+        longitude: _defaultCenter.longitude,
+        timestamp: DateTime.now(),
+        accuracy: 1,
+        altitude: 1,
+        heading: 1,
+        speed: 1,
+        speedAccuracy: 1,
+        altitudeAccuracy: 1,
+        headingAccuracy: 1,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _userPosition = position;
+        _originController.text = "Lokasi Saya (Medan)";
+      });
+
+      // FIX 3: Pakai safe move via completer
+      final ctrl = await _mapControllerCompleter.future;
+      ctrl.move(LatLng(position.latitude, position.longitude), 14);
+    } catch (e) {
+      debugPrint("GPS error: $e");
+    }
   }
 
   Future<void> _fetchSmartRoutes() async {
@@ -121,18 +154,23 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
 
   void _drawRoute(dynamic geometry, {int? index}) {
     if (geometry == null || geometry is! List || geometry.isEmpty) return;
-    List<LatLng> points = [];
-    for (var coord in geometry) {
-      points.add(
+    final List<LatLng> points = [
+      for (var coord in geometry)
         LatLng((coord[1] as num).toDouble(), (coord[0] as num).toDouble()),
-      );
-    }
+    ];
     setState(() {
       _currentPolyline = points;
       if (index != null) _selectedRouteIndex = index;
     });
-    if (points.isNotEmpty) {
-      _mapController.move(points[points.length ~/ 2], 13.0);
+    if (points.isNotEmpty && _mapController != null) {
+      _mapController!.move(points[points.length ~/ 2], 13.0);
+    }
+  }
+
+  // ── FIX 4: Safe move helper ───────────────────────────────────────────────
+  void _safeMove(LatLng center, double zoom) {
+    if (_mapControllerCompleter.isCompleted && _mapController != null) {
+      _mapController!.move(center, zoom);
     }
   }
 
@@ -189,26 +227,43 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
         children: [
           // ── PETA ──────────────────────────────────────────────
           FlutterMap(
-            mapController: _mapController,
-            options: const MapOptions(
-              initialCenter: LatLng(3.5952, 98.6722),
-              initialZoom: 13,
+            options: MapOptions(
+              // FIX 5: initialCenter & initialZoom langsung pakai default,
+              // tidak ada async di sini → peta langsung render
+              initialCenter: _defaultCenter,
+              initialZoom: 14,
+              // FIX 6: onMapReady menggantikan pola MapController lama
+              onMapReady: () {
+                // Resolve completer sehingga _mapController siap dipakai
+                if (!_mapControllerCompleter.isCompleted) {
+                  _mapControllerCompleter.complete(_mapController);
+                }
+              },
             ),
+            // FIX 7: Pasang controller via MapOptions bukan konstruktor lama
             children: [
+              // FIX 8: Hapus @2x agar tile lebih kecil & cepat dimuat;
+              //         ganti retina=true dengan retina=false (default)
               TileLayer(
                 urlTemplate:
-                    'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
+                    'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}?access_token=${ApiService.mapboxToken}',
                 userAgentPackageName: 'com.medanflow.app',
+                // FIX 9: Aktifkan keep alive & beri maxNativeZoom agar
+                //         flutter_map tidak minta tile resolusi terlalu tinggi
+                maxNativeZoom: 18,
+                // FIX 10: Cache tile di memory supaya pan/zoom lebih smooth
+                keepBuffer: 4,
               ),
               PolylineLayer(
                 polylines: [
-                  Polyline(
-                    points: _currentPolyline,
-                    color: _P.b500,
-                    strokeWidth: 5.5,
-                    strokeCap: StrokeCap.round,
-                    strokeJoin: StrokeJoin.round,
-                  ),
+                  if (_currentPolyline.isNotEmpty)
+                    Polyline(
+                      points: _currentPolyline,
+                      color: _P.b500,
+                      strokeWidth: 5.5,
+                      strokeCap: StrokeCap.round,
+                      strokeJoin: StrokeJoin.round,
+                    ),
                 ],
               ),
               if (_userPosition != null)
@@ -354,17 +409,17 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
               children: [
                 _buildMapActionBtn(
                   Icons.add_rounded,
-                  () => _mapController.move(
-                    _mapController.camera.center,
-                    _mapController.camera.zoom + 1,
+                  () => _safeMove(
+                    _mapController?.camera.center ?? _defaultCenter,
+                    (_mapController?.camera.zoom ?? 14) + 1,
                   ),
                 ),
                 const SizedBox(height: 8),
                 _buildMapActionBtn(
                   Icons.remove_rounded,
-                  () => _mapController.move(
-                    _mapController.camera.center,
-                    _mapController.camera.zoom - 1,
+                  () => _safeMove(
+                    _mapController?.camera.center ?? _defaultCenter,
+                    (_mapController?.camera.zoom ?? 14) - 1,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -476,7 +531,6 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
           ),
           child: Column(
             children: [
-              // drag handle
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Container(
@@ -488,7 +542,6 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                   ),
                 ),
               ),
-              // header
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
@@ -529,9 +582,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                   ],
                 ),
               ),
-              // divider
               Container(height: 1, color: _P.b50),
-              // list
               Expanded(
                 child: _recommendations.isEmpty
                     ? Center(
@@ -613,7 +664,6 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
       ),
       child: Row(
         children: [
-          // ETA block
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(

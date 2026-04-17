@@ -1,12 +1,12 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:latlong2/latlong.dart';
 import '../services/api_service.dart';
 
 // ─────────────────────────────────────────────
-// Palette (same as LandingPage & DriverManagementScreen)
+// Palette
 // ─────────────────────────────────────────────
 class _P {
   static const b50 = Color(0xFFEFF6FF);
@@ -18,10 +18,8 @@ class _P {
   static const b600 = Color(0xFF2563EB);
   static const b700 = Color(0xFF1D4ED8);
   static const b800 = Color(0xFF1E40AF);
-  static const bg = Color(0xFFEEF4FF);
   static const card = Colors.white;
   static const ink = Color(0xFF0F172A);
-  static const ink2 = Color(0xFF334155);
   static const ink3 = Color(0xFF64748B);
   static const ink4 = Color(0xFF94A3B8);
   static const dark = Color(0xFF0F2878);
@@ -36,23 +34,22 @@ class AngkotTrackingScreen extends StatefulWidget {
 
 class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     with SingleTickerProviderStateMixin {
-  // ── Data (unchanged) ─────────────────────────────────────────
   final ApiService _apiService = ApiService();
   final MapController _mapController = MapController();
 
   List<Marker> _markers = [];
   Timer? _timer;
   bool _isLoading = true;
+  bool _mapReady = false;
   List<dynamic> _angkotList = [];
 
-  // ── Animation ────────────────────────────────────────────────
   late AnimationController _orbCtrl;
 
   @override
   void initState() {
     super.initState();
     _fetchData();
-    _timer = Timer.periodic(const Duration(seconds: 10), (t) => _fetchData());
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchData());
     _orbCtrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 10),
@@ -66,19 +63,20 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     super.dispose();
   }
 
-  // ── Logic (all unchanged) ────────────────────────────────────
+  // ── Data ─────────────────────────────────────────────────────
   Future<void> _fetchData() async {
     try {
       final data = await _apiService.getActiveAngkots();
       if (mounted) {
         setState(() {
           _angkotList = data;
-          _updateMarkers(data);
           _isLoading = false;
         });
+        _updateMarkers(data);
       }
     } catch (e) {
       debugPrint('OSM Tracking Error: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -101,7 +99,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Label nomor angkot
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 7,
@@ -129,7 +126,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                   ),
                 ),
                 const SizedBox(height: 2),
-                // Icon bus
                 Icon(
                   Icons.directions_bus_rounded,
                   color: statusColor,
@@ -144,7 +140,7 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
         ),
       );
     }
-    setState(() => _markers = newMarkers);
+    if (mounted) setState(() => _markers = newMarkers);
   }
 
   void _focusOnAngkot(dynamic angkot) {
@@ -176,47 +172,170 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // 1. Peta full screen
-          FlutterMap(
-            mapController: _mapController,
-            options: const MapOptions(
-              initialCenter: LatLng(3.5952, 98.6722),
-              initialZoom: 13,
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.medanflow.app',
-              ),
-              MarkerLayer(markers: _markers),
-            ],
-          ),
+          // ── 1. Map ─────────────────────────────────────────
+          _buildMap(),
 
-          // 2. Gradient header overlay
+          // ── 2. Skeleton overlay (shown until map is ready)
+          if (!_mapReady) _buildMapSkeleton(),
+
+          // ── 3. Header ──────────────────────────────────────
           Positioned(top: 0, left: 0, right: 0, child: _buildHeader()),
 
-          // 3. Zoom controls
+          // ── 4. Zoom controls ───────────────────────────────
           Positioned(
             right: 16,
             top: MediaQuery.of(context).size.height * 0.28,
             child: _buildZoomControls(),
           ),
 
-          // 4. Draggable list panel
+          // ── 5. Draggable list ──────────────────────────────
           _buildDraggableAngkotList(),
 
-          // 5. Loading
-          if (_isLoading)
-            Container(
-              color: Colors.black.withOpacity(0.12),
-              child: const Center(
-                child: CircularProgressIndicator(
-                  color: _P.b600,
-                  strokeWidth: 2.5,
+          // ── 6. Subtle loading spinner after map ready
+          if (_isLoading && _mapReady)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 100,
+              right: 70,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(color: _P.b500.withOpacity(0.15), blurRadius: 10),
+                  ],
+                ),
+                child: const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    color: _P.b600,
+                    strokeWidth: 2,
+                  ),
                 ),
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  // ── Map ──────────────────────────────────────────────────────
+  Widget _buildMap() {
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter: const LatLng(3.5952, 98.6722),
+        initialZoom: 13,
+        interactionOptions: const InteractionOptions(
+          flags: InteractiveFlag.all,
+        ),
+        // FIX: Langsung set _mapReady tanpa Future.delayed
+        // sehingga peta muncul secepat mungkin
+        onMapReady: () {
+          if (mounted) setState(() => _mapReady = true);
+        },
+      ),
+      children: [
+        // ── Tile layer ──────────────────────────────────────
+        TileLayer(
+          urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          subdomains: const ['a', 'b', 'c'],
+          userAgentPackageName: 'com.medanflow.app',
+
+          // FIX: CancellableTileProvider dari versi ^3.0.0
+          tileProvider: CancellableNetworkTileProvider(),
+
+          maxNativeZoom: 19,
+
+          // FIX: panBuffer 0 = tidak pre-fetch tile di luar viewport
+          // ini yang bikin peta lebih cepat muncul
+          panBuffer: 0,
+
+          // Simpan tile yang sudah dimuat agar tidak re-fetch saat pan kembali
+          keepBuffer: 2,
+
+          // Fade ringan agar tidak terasa "pop"
+          tileDisplay: const TileDisplay.fadeIn(
+            duration: Duration(milliseconds: 150),
+            startOpacity: 0.6,
+          ),
+
+          errorTileCallback: (tile, error, stackTrace) {
+            debugPrint('Tile error: $error');
+          },
+        ),
+        MarkerLayer(markers: _markers, rotate: false),
+      ],
+    );
+  }
+
+  // ── Map Skeleton ─────────────────────────────────────────────
+  Widget _buildMapSkeleton() {
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: _orbCtrl,
+        builder: (_, __) {
+          return Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  const Color(0xFFCFDDEE),
+                  Color.lerp(
+                    const Color(0xFFBDCEE2),
+                    const Color(0xFFD8E6F3),
+                    _orbCtrl.value,
+                  )!,
+                  const Color(0xFFCFDDEE),
+                ],
+              ),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const Icon(
+                      Icons.map_outlined,
+                      size: 28,
+                      color: _P.b600,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Memuat peta…',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: _P.b700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: 120,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: const LinearProgressIndicator(
+                        value: null,
+                        backgroundColor: _P.b200,
+                        color: _P.b600,
+                        minHeight: 4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -246,7 +365,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
         ),
         child: Stack(
           children: [
-            // Radial gloss overlay
             Positioned.fill(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(22),
@@ -266,7 +384,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
             ),
             Row(
               children: [
-                // Back button
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
                   child: Container(
@@ -284,7 +401,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                   ),
                 ),
                 const SizedBox(width: 12),
-                // Title + subtitle
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -309,7 +425,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                     ],
                   ),
                 ),
-                // Live badge
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
@@ -411,7 +526,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
           ),
           child: Column(
             children: [
-              // Handle bar
               Container(
                 margin: const EdgeInsets.symmetric(vertical: 12),
                 width: 40,
@@ -421,7 +535,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
-              // Panel header
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 child: Row(
@@ -479,10 +592,8 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                   ],
                 ),
               ),
-              // Divider
               Container(height: 1, color: _P.b100),
               const SizedBox(height: 4),
-              // List
               Expanded(
                 child: _angkotList.isEmpty
                     ? _buildEmptyState()
@@ -527,7 +638,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
         ),
         child: Row(
           children: [
-            // Icon container
             Container(
               width: 48,
               height: 48,
@@ -546,7 +656,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
               ),
             ),
             const SizedBox(width: 14),
-            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -594,7 +703,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
                 ],
               ),
             ),
-            // Chevron
             Container(
               width: 30,
               height: 30,
@@ -614,7 +722,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Status Badge ─────────────────────────────────────────────
   Widget _statusBadge(String status) {
     final isFull = status == 'Penuh';
     return Container(
@@ -638,7 +745,6 @@ class _AngkotTrackingScreenState extends State<AngkotTrackingScreen>
     );
   }
 
-  // ── Empty State ──────────────────────────────────────────────
   Widget _buildEmptyState() {
     return Center(
       child: Column(
