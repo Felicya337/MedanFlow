@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_medan_flow/services/api_service.dart';
 import 'login_screen.dart';
@@ -13,9 +17,10 @@ import 'notification_screen.dart';
 import 'onboarding_overlay.dart';
 
 // ─────────────────────────────────────────────
-// Palette
+// Design Tokens
 // ─────────────────────────────────────────────
-class _P {
+class _T {
+  // Blues
   static const b50 = Color(0xFFEFF6FF);
   static const b100 = Color(0xFFDBEAFE);
   static const b200 = Color(0xFFBFDBFE);
@@ -25,432 +30,130 @@ class _P {
   static const b600 = Color(0xFF2563EB);
   static const b700 = Color(0xFF1D4ED8);
   static const b800 = Color(0xFF1E40AF);
-  static const bg = Color(0xFFEEF4FF);
+  static const b900 = Color(0xFF1E3A8A);
+
+  // Neutrals
+  static const bg = Color(0xFFF0F5FF);
   static const card = Colors.white;
   static const ink = Color(0xFF0F172A);
-  static const ink2 = Color(0xFF334155);
-  static const ink3 = Color(0xFF64748B);
+  static const ink2 = Color(0xFF1E293B);
+  static const ink3 = Color(0xFF475569);
   static const ink4 = Color(0xFF94A3B8);
-  static const dark = Color(0xFF0F2878);
+  static const ink5 = Color(0xFFCBD5E1);
+
+  // Status
+  static const green = Color(0xFF16A34A);
+  static const greenBg = Color(0xFFF0FDF4);
+  static const red = Color(0xFFDC2626);
+  static const redBg = Color(0xFFFEF2F2);
+  static const orange = Color(0xFFEA580C);
+  static const amber = Color(0xFFF59E0B);
+
+  // Brand dark
+  static const navy = Color(0xFF0B1D6E);
+  static const dark = Color(0xFF0A1545);
 }
 
-// ══════════════════════════════════════════════════════════════
-//  ANIMATED WEATHER ICONS
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+// Weather data model
+// ─────────────────────────────────────────────
+class _WeatherData {
+  final String condition;
+  final String icon; // 'sunny' | 'cloudy' | 'rainy'
+  final String temp;
+  final String humidity;
+  final String windSpeed;
+  final String location;
+  final String title;
+  final List<String> tips;
 
-class RainyWeatherIcon extends StatefulWidget {
-  final double size;
-  const RainyWeatherIcon({super.key, this.size = 64});
-  @override
-  State<RainyWeatherIcon> createState() => _RainyWeatherIconState();
-}
+  const _WeatherData({
+    required this.condition,
+    required this.icon,
+    required this.temp,
+    required this.humidity,
+    required this.windSpeed,
+    required this.location,
+    required this.title,
+    required this.tips,
+  });
 
-class _RainyWeatherIconState extends State<RainyWeatherIcon>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1600),
-    )..repeat();
-  }
+  factory _WeatherData.fromJson(Map<String, dynamic> j) => _WeatherData(
+    condition: j['condition'] as String? ?? 'Berawan',
+    icon: j['icon'] as String? ?? 'cloudy',
+    temp: j['temp'] as String? ?? '29°C',
+    humidity: j['humidity'] as String? ?? '70%',
+    windSpeed: j['wind_speed'] as String? ?? '10 m/s',
+    location: j['location'] as String? ?? 'Medan, Indonesia',
+    title: j['title'] as String? ?? 'Cuaca normal',
+    tips: List<String>.from(j['tips'] as List? ?? []),
+  );
 
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _ctrl,
-    builder: (_, __) => CustomPaint(
-      size: Size(widget.size, widget.size),
-      painter: _RainyPainter(t: _ctrl.value),
-    ),
+  factory _WeatherData.fallback() => const _WeatherData(
+    condition: 'Berawan',
+    icon: 'cloudy',
+    temp: '29°C',
+    humidity: '70%',
+    windSpeed: '10 m/s',
+    location: 'Medan, Indonesia',
+    title: 'Mendung – tetap waspada',
+    tips: ['Siapkan perlengkapan hujan', 'Perhatikan kondisi jalan'],
   );
 }
 
-class _RainyPainter extends CustomPainter {
-  final double t;
-  _RainyPainter({required this.t});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final floatY = math.sin(t * math.pi * 2) * 3.5;
-    _drawCloud(
-      canvas,
-      w,
-      h,
-      floatY,
-      Paint()
-        ..color = Colors.white.withOpacity(0.18)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+// ─────────────────────────────────────────────
+// Nominatim place
+// ─────────────────────────────────────────────
+class _Place {
+  final String display;
+  final String short;
+  final double lat;
+  final double lon;
+  const _Place({
+    required this.display,
+    required this.short,
+    required this.lat,
+    required this.lon,
+  });
+  factory _Place.fromJson(Map<String, dynamic> j) {
+    final d = j['display_name'] as String;
+    final parts = d.split(',');
+    final s = parts.length >= 2
+        ? '${parts[0].trim()}, ${parts[1].trim()}'
+        : parts[0].trim();
+    return _Place(
+      display: d,
+      short: s,
+      lat: double.parse(j['lat'] as String),
+      lon: double.parse(j['lon'] as String),
     );
-    _drawCloud(
-      canvas,
-      w,
-      h,
-      floatY,
-      Paint()
-        ..shader = LinearGradient(
-          colors: [
-            Colors.white.withOpacity(0.95),
-            Colors.white.withOpacity(0.72),
-          ],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ).createShader(Rect.fromLTWH(w * 0.08, h * 0.08, w * 0.84, h * 0.56)),
-    );
+  }
+}
 
-    final dropPositions = [
-      Offset(w * 0.24, h * 0.62),
-      Offset(w * 0.38, h * 0.65),
-      Offset(w * 0.53, h * 0.62),
-      Offset(w * 0.68, h * 0.65),
-      Offset(w * 0.31, h * 0.76),
-      Offset(w * 0.60, h * 0.76),
-    ];
-    final delays = [0.0, 0.20, 0.40, 0.60, 0.10, 0.50];
-    for (int i = 0; i < dropPositions.length; i++) {
-      final progress = (t + delays[i]) % 1.0;
-      final opacity = progress < 0.65
-          ? (progress < 0.1 ? progress / 0.1 : 1.0)
-          : (1.0 - progress) / 0.35;
-      final yOff = progress * h * 0.25;
-      final p1 = dropPositions[i].translate(0, yOff + floatY);
-      final p2 = p1.translate(-h * 0.05, h * 0.12);
-      canvas.drawLine(
-        p1,
-        p2,
-        Paint()
-          ..color = Colors.white.withOpacity((opacity * 0.88).clamp(0, 1))
-          ..strokeWidth = 2.4
-          ..strokeCap = StrokeCap.round,
-      );
+Future<List<_Place>> _nominatimSearch(String q) async {
+  if (q.trim().length < 3) return [];
+  try {
+    final uri = Uri.parse(
+      'https://nominatim.openstreetmap.org/search'
+      '?q=${Uri.encodeComponent('$q, Medan, Sumatera Utara')}'
+      '&format=json&limit=5&countrycodes=id'
+      '&viewbox=98.5,3.4,98.9,3.8&bounded=0',
+    );
+    final r = await http
+        .get(
+          uri,
+          headers: {'User-Agent': 'MedanFlow/1.0', 'Accept-Language': 'id'},
+        )
+        .timeout(const Duration(seconds: 8));
+    if (r.statusCode == 200) {
+      return (jsonDecode(r.body) as List)
+          .map((e) => _Place.fromJson(e))
+          .toList();
     }
+  } catch (e) {
+    debugPrint('Nominatim: $e');
   }
-
-  void _drawCloud(
-    Canvas canvas,
-    double w,
-    double h,
-    double floatY,
-    Paint paint,
-  ) {
-    final cx = w * 0.50;
-    final cy = h * 0.30 + floatY;
-    final path = Path();
-    path.addOval(
-      Rect.fromCenter(
-        center: Offset(cx, cy),
-        width: w * 0.58,
-        height: h * 0.32,
-      ),
-    );
-    path.addOval(
-      Rect.fromCenter(
-        center: Offset(cx - w * 0.19, cy + h * 0.05),
-        width: w * 0.30,
-        height: h * 0.24,
-      ),
-    );
-    path.addOval(
-      Rect.fromCenter(
-        center: Offset(cx + w * 0.19, cy + h * 0.06),
-        width: w * 0.26,
-        height: h * 0.20,
-      ),
-    );
-    path.addRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTRB(
-          cx - w * 0.29,
-          cy - h * 0.02,
-          cx + w * 0.29,
-          cy + h * 0.16,
-        ),
-        const Radius.circular(10),
-      ),
-    );
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_RainyPainter old) => old.t != t;
-}
-
-class CloudySunIcon extends StatefulWidget {
-  final double size;
-  const CloudySunIcon({super.key, this.size = 64});
-  @override
-  State<CloudySunIcon> createState() => _CloudySunIconState();
-}
-
-class _CloudySunIconState extends State<CloudySunIcon>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 4),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _ctrl,
-    builder: (_, __) => CustomPaint(
-      size: Size(widget.size, widget.size),
-      painter: _CloudySunPainter(t: _ctrl.value),
-    ),
-  );
-}
-
-class _CloudySunPainter extends CustomPainter {
-  final double t;
-  _CloudySunPainter({required this.t});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final floatY = math.sin(t * math.pi * 2) * 3.0;
-    final sunCenter = Offset(w * 0.30, h * 0.34 + floatY * 0.4);
-
-    canvas.drawCircle(
-      sunCenter,
-      w * 0.22,
-      Paint()
-        ..color = const Color(0xFFFDE68A).withOpacity(0.30)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
-    );
-
-    final rayPaint = Paint()
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    for (int i = 0; i < 8; i++) {
-      final angle = (i / 8) * math.pi * 2 + t * math.pi * 2;
-      final isLong = i % 2 == 0;
-      rayPaint
-        ..color = const Color(0xFFFDE68A).withOpacity(isLong ? 0.9 : 0.5)
-        ..strokeWidth = isLong ? 2.2 : 1.6;
-      canvas.drawLine(
-        sunCenter.translate(
-          math.cos(angle) * w * 0.16,
-          math.sin(angle) * w * 0.16,
-        ),
-        sunCenter.translate(
-          math.cos(angle) * w * (isLong ? 0.26 : 0.22),
-          math.sin(angle) * w * (isLong ? 0.26 : 0.22),
-        ),
-        rayPaint,
-      );
-    }
-    canvas.drawCircle(
-      sunCenter,
-      w * 0.12,
-      Paint()
-        ..shader = RadialGradient(
-          colors: [const Color(0xFFFCD34D), const Color(0xFFF59E0B)],
-        ).createShader(Rect.fromCircle(center: sunCenter, radius: w * 0.12)),
-    );
-
-    final cloudCx = w * 0.57;
-    final cloudCy = h * 0.52 + floatY;
-    _drawCloud(
-      canvas,
-      cloudCx,
-      cloudCy,
-      w,
-      h,
-      Paint()
-        ..color = Colors.white.withOpacity(0.15)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
-    );
-    _drawCloud(
-      canvas,
-      cloudCx,
-      cloudCy,
-      w,
-      h,
-      Paint()
-        ..shader =
-            LinearGradient(
-              colors: [
-                Colors.white.withOpacity(0.97),
-                Colors.white.withOpacity(0.75),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ).createShader(
-              Rect.fromLTWH(
-                cloudCx - w * 0.28,
-                cloudCy - h * 0.18,
-                w * 0.56,
-                h * 0.40,
-              ),
-            ),
-    );
-  }
-
-  void _drawCloud(
-    Canvas canvas,
-    double cx,
-    double cy,
-    double w,
-    double h,
-    Paint paint,
-  ) {
-    final path = Path();
-    path.addOval(
-      Rect.fromCenter(
-        center: Offset(cx, cy),
-        width: w * 0.48,
-        height: h * 0.26,
-      ),
-    );
-    path.addOval(
-      Rect.fromCenter(
-        center: Offset(cx - w * 0.16, cy + h * 0.04),
-        width: w * 0.26,
-        height: h * 0.20,
-      ),
-    );
-    path.addOval(
-      Rect.fromCenter(
-        center: Offset(cx + w * 0.15, cy + h * 0.05),
-        width: w * 0.22,
-        height: h * 0.17,
-      ),
-    );
-    path.addRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTRB(cx - w * 0.24, cy, cx + w * 0.24, cy + h * 0.14),
-        const Radius.circular(8),
-      ),
-    );
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_CloudySunPainter old) => old.t != t;
-}
-
-class SunnyIcon extends StatefulWidget {
-  final double size;
-  const SunnyIcon({super.key, this.size = 64});
-  @override
-  State<SunnyIcon> createState() => _SunnyIconState();
-}
-
-class _SunnyIconState extends State<SunnyIcon>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 5),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _ctrl,
-    builder: (_, __) => CustomPaint(
-      size: Size(widget.size, widget.size),
-      painter: _SunnyPainter(t: _ctrl.value),
-    ),
-  );
-}
-
-class _SunnyPainter extends CustomPainter {
-  final double t;
-  _SunnyPainter({required this.t});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final center = Offset(w * 0.5, h * 0.5);
-    final pulse = math.sin(t * math.pi * 2) * 0.07 + 1.0;
-
-    canvas.drawCircle(
-      center,
-      w * 0.44 * pulse,
-      Paint()
-        ..color = const Color(0xFFFDE68A).withOpacity(0.18)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
-    );
-    canvas.drawCircle(
-      center,
-      w * 0.33 * pulse,
-      Paint()
-        ..color = const Color(0xFFFCD34D).withOpacity(0.28)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
-    );
-
-    final rayAngle = t * math.pi * 2;
-    for (int i = 0; i < 12; i++) {
-      final angle = (i / 12) * math.pi * 2 + rayAngle;
-      final isLong = i % 2 == 0;
-      canvas.drawLine(
-        center.translate(
-          math.cos(angle) * w * 0.28,
-          math.sin(angle) * w * 0.28,
-        ),
-        center.translate(
-          math.cos(angle) * w * (isLong ? 0.44 : 0.38),
-          math.sin(angle) * w * (isLong ? 0.44 : 0.38),
-        ),
-        Paint()
-          ..color = const Color(0xFFFDE68A).withOpacity(isLong ? 0.92 : 0.55)
-          ..strokeWidth = isLong ? 2.6 : 1.8
-          ..strokeCap = StrokeCap.round,
-      );
-    }
-    canvas.drawCircle(
-      center,
-      w * 0.23,
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            const Color(0xFFFBBF24),
-            const Color(0xFFF59E0B),
-            const Color(0xFFD97706),
-          ],
-          stops: const [0.0, 0.65, 1.0],
-        ).createShader(Rect.fromCircle(center: center, radius: w * 0.23)),
-    );
-    canvas.drawCircle(
-      center.translate(-w * 0.07, -h * 0.07),
-      w * 0.09,
-      Paint()..color = Colors.white.withOpacity(0.42),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_SunnyPainter old) => old.t != t;
+  return [];
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -464,254 +167,690 @@ class LandingPage extends StatefulWidget {
 
 class _LandingPageState extends State<LandingPage>
     with SingleTickerProviderStateMixin {
-  // ── State ────────────────────────────────────────────────────
-  int _unreadNotif = 0;
-  bool _showCriticalBanner = false;
-  String _bannerMessage = '';
+  // ── Map ──────────────────────────────────────────────────────
+  final _mapCtrl = MapController();
+  static const _medan = LatLng(3.5952, 98.6722);
 
-  Map<String, dynamic>? _weatherData;
-  bool _isLoadingWeather = true;
+  // ── GPS ──────────────────────────────────────────────────────
+  LatLng? _userLatLng;
 
-  String? _weatherTitle;
-  List<String> _weatherTips = [];
+  // ── Weather ──────────────────────────────────────────────────
+  _WeatherData? _weather;
+  bool _weatherLoading = true;
+  bool _weatherExpanded = false;
 
+  // ── Notifications ────────────────────────────────────────────
+  int _unread = 0;
+  bool _showBanner = false;
+  String _bannerMsg = '';
+
+  // ── Nav ──────────────────────────────────────────────────────
   int _activeNav = 0;
-  late AnimationController _orbCtrl;
 
-  // ── GlobalKeys untuk onboarding ──────────────────────────────
-  final _keyNotif = GlobalKey();
+  // ── Angkot live markers ───────────────────────────────────────
+  List<Marker> _angkotMarkers = [];
+  Timer? _angkotTimer;
+
+  // ── Bottom sheet ─────────────────────────────────────────────
+  final _sheetCtrl = DraggableScrollableController();
+  static const double _sizeCollapsed =
+      0.18; // sedikit lebih tinggi agar tombol driver muat
+  static const double _sizeSearch = 0.48;
+  static const double _sizeResults = 0.85;
+
+  // ── Search state ─────────────────────────────────────────────
+  int _sheetPhase = 0;
+
+  _Place? _originPlace;
+  _Place? _destPlace;
+  bool _originIsGps = true;
+  String _originLabel = 'Lokasi Saya';
+
+  List<_Place> _suggestions = [];
+  bool _searchingFor = false;
+  bool _loadingSugg = false;
+  Timer? _debounce;
+
+  final _originCtrl = TextEditingController();
+  final _destCtrl = TextEditingController();
+  final _originFocus = FocusNode();
+  final _destFocus = FocusNode();
+
+  // ── Trip results ─────────────────────────────────────────────
+  bool _tripLoading = false;
+  Map<String, dynamic>? _tripResult;
+
+  // ── Onboarding ────────────────────────────────────────────────
+  final _keyHeader = GlobalKey();
   final _keyWeather = GlobalKey();
-  final _keyQuickRute = GlobalKey();
-  final _keyQuickAngkot = GlobalKey();
-  final _keyTrafficStrip = GlobalKey();
+  final _keyStartTrip = GlobalKey();
+  final _keyNavAngkot = GlobalKey();
+  final _keyNavTraffic = GlobalKey();
+  static const _kObDone = 'onboarding_done_v4';
+  bool _obDone = false;
 
-  // ── Key SharedPreferences untuk flag onboarding ──────────────
-  static const _kOnboardingDone = 'onboarding_done';
+  // ── Pulse animation ───────────────────────────────────────────
+  late AnimationController _pulseCtrl;
 
-  bool _onboardingDone = false;
-
+  // ─────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
-    _checkNotifications();
-    _fetchWeather();
-    _orbCtrl = AnimationController(
+    _pulseCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 10),
+      duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Cek SharedPreferences dulu sebelum memutuskan tampilkan onboarding
-      _maybeShowOnboarding();
-    });
+    _fetchWeather();
+    _checkNotifications();
+    _detectGps();
+    _fetchAngkots();
+    _angkotTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _fetchAngkots(),
+    );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOnboard());
   }
 
   @override
   void dispose() {
-    _orbCtrl.dispose();
+    _pulseCtrl.dispose();
+    _angkotTimer?.cancel();
+    _sheetCtrl.dispose();
+    _debounce?.cancel();
+    _originCtrl.dispose();
+    _destCtrl.dispose();
+    _originFocus.dispose();
+    _destFocus.dispose();
     super.dispose();
   }
 
-  // ── Cek apakah onboarding perlu ditampilkan ──────────────────
-  /// Membaca flag dari SharedPreferences.
-  /// Jika belum pernah selesai onboarding → tampilkan.
-  /// Jika sudah → langsung skip.
-  Future<void> _maybeShowOnboarding() async {
-    final prefs = await SharedPreferences.getInstance();
-    final alreadyDone = prefs.getBool(_kOnboardingDone) ?? false;
+  // ─────────────────────────────────────────────────────────────
+  //  DATA FETCHING
+  // ─────────────────────────────────────────────────────────────
 
-    if (alreadyDone) {
-      // Onboarding sudah pernah selesai, tidak perlu ditampilkan lagi
-      if (mounted) setState(() => _onboardingDone = true);
+  Future<void> _fetchWeather() async {
+    setState(() => _weatherLoading = true);
+    try {
+      final r = await http
+          .get(Uri.parse('${ApiService().baseUrl}/weather/current'))
+          .timeout(const Duration(seconds: 10));
+      if (r.statusCode == 200 && mounted) {
+        final json = jsonDecode(r.body) as Map<String, dynamic>;
+        setState(() {
+          _weather = _WeatherData.fromJson(json);
+          _weatherLoading = false;
+        });
+      } else {
+        if (mounted)
+          setState(() {
+            _weather = _WeatherData.fallback();
+            _weatherLoading = false;
+          });
+      }
+    } catch (_) {
+      if (mounted)
+        setState(() {
+          _weather = _WeatherData.fallback();
+          _weatherLoading = false;
+        });
+    }
+  }
+
+  Future<void> _checkNotifications() async {
+    try {
+      final data = await ApiService().getNotifications();
+      if (!mounted) return;
+      setState(() {
+        _unread = data['unread_count'] as int;
+        if (_unread > 0) {
+          _showBanner = true;
+          _bannerMsg = data['alerts'][0]['message'] as String;
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _detectGps() async {
+    try {
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.always ||
+          perm == LocationPermission.whileInUse) {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        if (!mounted) return;
+        final ll = LatLng(pos.latitude, pos.longitude);
+        setState(() {
+          _userLatLng = ll;
+          _originLabel = 'Lokasi Saya Saat Ini';
+        });
+        _mapCtrl.move(ll, 14);
+      }
+    } catch (e) {
+      debugPrint('GPS: $e');
+    }
+  }
+
+  Future<void> _fetchAngkots() async {
+    try {
+      final data = await ApiService().getActiveAngkots();
+      if (!mounted) return;
+      final m = <Marker>[];
+      for (final a in data) {
+        final full = a['crowd_status'] == 'Penuh';
+        final color = full ? _T.red : _T.b600;
+        m.add(
+          Marker(
+            point: LatLng(
+              double.parse(a['latitude'].toString()),
+              double.parse(a['longitude'].toString()),
+            ),
+            width: 38,
+            height: 38,
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withOpacity(.45),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
+                ],
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: const Icon(
+                Icons.directions_bus_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+          ),
+        );
+      }
+      setState(() => _angkotMarkers = m);
+    } catch (_) {}
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  //  SEARCH
+  // ─────────────────────────────────────────────────────────────
+
+  void _onSearchChanged(String q, bool isOrigin) {
+    _debounce?.cancel();
+    if (q.trim().isEmpty) {
+      setState(() {
+        _suggestions = [];
+        _loadingSugg = false;
+      });
+      return;
+    }
+    setState(() => _loadingSugg = true);
+    _debounce = Timer(const Duration(milliseconds: 450), () async {
+      final res = await _nominatimSearch(q);
+      if (mounted)
+        setState(() {
+          _suggestions = res;
+          _loadingSugg = false;
+        });
+    });
+  }
+
+  void _selectPlace(_Place p, bool isOrigin) {
+    setState(() {
+      if (isOrigin) {
+        _originPlace = p;
+        _originIsGps = false;
+        _originLabel = p.short;
+        _originCtrl.text = p.short;
+      } else {
+        _destPlace = p;
+        _destCtrl.text = p.short;
+      }
+      _suggestions = [];
+      _loadingSugg = false;
+    });
+    _originFocus.unfocus();
+    _destFocus.unfocus();
+    _mapCtrl.move(LatLng(p.lat, p.lon), 14);
+
+    final hasOrigin = _originIsGps ? _userLatLng != null : _originPlace != null;
+    final hasDest = isOrigin ? _destPlace != null : true;
+    if (hasOrigin && hasDest) {
+      _fetchTripResults();
+    } else {
+      if (isOrigin) _destFocus.requestFocus();
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  //  TRIP
+  // ─────────────────────────────────────────────────────────────
+
+  Future<void> _fetchTripResults() async {
+    final hasOrigin = _originIsGps ? _userLatLng != null : _originPlace != null;
+    if (!hasOrigin || _destPlace == null) {
+      _expandToSearch();
+      _showSnack('Pilih lokasi asal & tujuan terlebih dahulu', isError: true);
       return;
     }
 
-    // Belum pernah selesai, tampilkan setelah delay kecil
+    setState(() {
+      _tripLoading = true;
+      _tripResult = null;
+    });
+    _originFocus.unfocus();
+    _destFocus.unfocus();
+
+    double oLat, oLng;
+    if (_originIsGps && _userLatLng != null) {
+      oLat = _userLatLng!.latitude;
+      oLng = _userLatLng!.longitude;
+    } else {
+      oLat = _originPlace!.lat;
+      oLng = _originPlace!.lon;
+    }
+    final dLat = _destPlace!.lat;
+    final dLng = _destPlace!.lon;
+
+    try {
+      final base = ApiService().baseUrl;
+      final results = await Future.wait([
+        http.get(
+          Uri.parse(
+            '$base/recommendations?lat=$oLat&lng=$oLng&dest_lat=$dLat&dest_lng=$dLng',
+          ),
+        ),
+        http.get(Uri.parse('$base/traffic-heatmap?minutes=5')),
+        http.get(Uri.parse('$base/travel-time/predict')),
+      ]).timeout(const Duration(seconds: 15));
+
+      if (!mounted) return;
+
+      setState(() {
+        _tripResult = {
+          'routes': results[0].statusCode == 200
+              ? jsonDecode(results[0].body) as List
+              : <dynamic>[],
+          'heatmap': results[1].statusCode == 200
+              ? jsonDecode(results[1].body)
+              : null,
+          'estimate': results[2].statusCode == 200
+              ? jsonDecode(results[2].body) as Map<String, dynamic>
+              : null,
+        };
+        _sheetPhase = 3;
+      });
+
+      final routes = _tripResult!['routes'] as List;
+      if (routes.isNotEmpty && routes[0]['geometry'] != null) {
+        final geo = routes[0]['geometry'] as List;
+        if (geo.isNotEmpty) {
+          final mid = geo[geo.length ~/ 2];
+          _mapCtrl.move(
+            LatLng((mid[1] as num).toDouble(), (mid[0] as num).toDouble()),
+            13,
+          );
+        }
+      }
+
+      _sheetCtrl.animateTo(
+        _sizeResults,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOutCubic,
+      );
+    } catch (e) {
+      if (mounted)
+        _showSnack('Gagal memuat data. Cek koneksi server.', isError: true);
+    } finally {
+      if (mounted) setState(() => _tripLoading = false);
+    }
+  }
+
+  void _showSnack(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w600)),
+        backgroundColor: isError ? _T.red : _T.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  //  SHEET HELPERS
+  // ─────────────────────────────────────────────────────────────
+
+  void _expandToSearch() {
+    setState(() {
+      _sheetPhase = 1;
+      _suggestions = [];
+    });
+    _sheetCtrl.animateTo(
+      _sizeSearch,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutCubic,
+    );
+    Future.delayed(const Duration(milliseconds: 380), () {
+      if (mounted && _destCtrl.text.isEmpty) _destFocus.requestFocus();
+    });
+  }
+
+  void _collapseSheet() {
+    setState(() {
+      _sheetPhase = 0;
+      _suggestions = [];
+      _tripResult = null;
+      _destPlace = null;
+      _destCtrl.clear();
+      if (!_originIsGps) {
+        _originPlace = null;
+        _originIsGps = true;
+        _originLabel = 'Lokasi Saya';
+        _originCtrl.clear();
+      }
+    });
+    _originFocus.unfocus();
+    _destFocus.unfocus();
+    _sheetCtrl.animateTo(
+      _sizeCollapsed,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInCubic,
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  //  ONBOARDING
+  // ─────────────────────────────────────────────────────────────
+
+  Future<void> _maybeOnboard() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kObDone) ?? false) {
+      if (mounted) setState(() => _obDone = true);
+      return;
+    }
     if (mounted) {
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (mounted && !_onboardingDone) _startOnboarding();
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (mounted && !_obDone) _startOnboarding();
       });
     }
   }
 
-  // ── Onboarding ───────────────────────────────────────────────
   void _startOnboarding() {
     OnboardingOverlay.show(
       context: context,
       steps: [
         OnboardingStep(
-          targetKey: _keyNotif,
+          targetKey: _keyHeader,
           icon: OnboardingIcon.notification,
-          title: 'Notifikasi & Peringatan',
+          title: 'Selamat Datang di MedFlow!',
           description:
-              'Dapatkan alert kemacetan parah dan info penting secara real-time.',
-          padding: const EdgeInsets.all(6),
+              'Navigasi angkot Medan berbasis AI. Tap notifikasi untuk peringatan kemacetan real-time.',
+          padding: const EdgeInsets.all(8),
         ),
         OnboardingStep(
           targetKey: _keyWeather,
           icon: OnboardingIcon.weather,
           title: 'Cuaca Real-time Medan',
           description:
-              'Pantau suhu, kelembaban, dan angin agar perjalananmu lebih siap.',
-          padding: const EdgeInsets.all(8),
+              'Informasi suhu, kelembapan & tips perjalanan hari ini langsung dari OpenWeather.',
+          padding: const EdgeInsets.all(6),
         ),
         OnboardingStep(
-          targetKey: _keyQuickRute,
+          targetKey: _keyStartTrip,
           icon: OnboardingIcon.route,
-          title: 'Rute Pintar',
+          title: 'Mulai Perjalanan',
           description:
-              'Temukan jalur tercepat di Medan dengan rekomendasi berbasis AI.',
-          padding: const EdgeInsets.all(6),
-        ),
-        OnboardingStep(
-          targetKey: _keyQuickAngkot,
-          icon: OnboardingIcon.angkot,
-          title: 'Live Angkot',
-          description:
-              'Posisi angkot real-time beserta estimasi waktu kedatangan.',
-          padding: const EdgeInsets.all(6),
-        ),
-        OnboardingStep(
-          targetKey: _keyTrafficStrip,
-          icon: OnboardingIcon.traffic,
-          title: 'Prediksi 30 Menit ke Depan',
-          description:
-              'Cek prakiraan kemacetan 30 menit ke depan untuk waktu terbaik berangkat.',
+              'Tap di sini lalu pilih tujuanmu. Angkot tercepat, kondisi lalu lintas, dan estimasi waktu tampil sekaligus.',
           padding: const EdgeInsets.all(8),
+        ),
+        OnboardingStep(
+          targetKey: _keyNavAngkot,
+          icon: OnboardingIcon.angkot,
+          title: 'Live Tracking Angkot',
+          description:
+              'Posisi & kepadatan angkot Medan terpantau langsung di peta secara real-time.',
+          padding: const EdgeInsets.all(6),
+        ),
+        OnboardingStep(
+          targetKey: _keyNavTraffic,
+          icon: OnboardingIcon.traffic,
+          title: 'Prediksi Kemacetan',
+          description:
+              'Heatmap kemacetan 30 menit ke depan untuk menentukan waktu terbaik berangkat.',
+          padding: const EdgeInsets.all(6),
         ),
       ],
       onFinished: () async {
-        // Simpan flag ke SharedPreferences agar tidak muncul lagi
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool(_kOnboardingDone, true);
-
-        if (mounted) setState(() => _onboardingDone = true);
+        await prefs.setBool(_kObDone, true);
+        if (mounted) setState(() => _obDone = true);
       },
     );
   }
 
-  // ── Notifications ────────────────────────────────────────────
-  Future<void> _checkNotifications() async {
-    try {
-      final data = await ApiService().getNotifications();
-      setState(() {
-        _unreadNotif = data['unread_count'] as int;
-        if (_unreadNotif > 0) {
-          _showCriticalBanner = true;
-          _bannerMessage = data['alerts'][0]['message'] as String;
-        }
-      });
-    } catch (e) {
-      debugPrint('Check Notif Failed: $e');
-    }
-  }
-
-  // ── Fetch cuaca ──────────────────────────────────────────────
-  Future<void> _fetchWeather() async {
-    try {
-      final response = await http.get(
-        Uri.parse('${ApiService().baseUrl}/weather/current'),
-      );
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-        setState(() {
-          _weatherData = decoded;
-          _weatherTitle = decoded['title'] as String?;
-          final rawTips = decoded['tips'];
-          _weatherTips = rawTips is List
-              ? rawTips.map((e) => e.toString()).toList()
-              : [];
-          _isLoadingWeather = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('Fetch Weather Failed: $e');
-      setState(() => _isLoadingWeather = false);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────────────
   //  BUILD
-  // ════════════════════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _P.bg,
       extendBody: true,
-      body: Stack(
-        children: [
-          _buildOrbBg(),
-          SafeArea(
-            bottom: false,
-            child: CustomScrollView(
-              physics: const BouncingScrollPhysics(),
-              slivers: [
-                SliverToBoxAdapter(child: _buildHeader()),
-                if (_showCriticalBanner)
-                  SliverToBoxAdapter(child: _buildAlertBanner()),
-                SliverToBoxAdapter(child: _buildWeatherCard()),
-                SliverToBoxAdapter(child: _sectionLabel('Aksi Cepat')),
-                SliverToBoxAdapter(child: _buildQuickActions()),
-                SliverToBoxAdapter(child: _buildTrafficStrip()),
-                SliverToBoxAdapter(
-                  child: _sectionLabel('Semua Fitur', trailing: 'Lihat Semua'),
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onTap: () {
+          if (_suggestions.isNotEmpty) setState(() => _suggestions = []);
+          _originFocus.unfocus();
+          _destFocus.unfocus();
+        },
+        child: Stack(
+          children: [
+            _buildMap(),
+            // Gradient overlay untuk legibility teks di atas
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 220,
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        _T.navy.withOpacity(0.82),
+                        _T.navy.withOpacity(0.30),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.55, 1.0],
+                    ),
+                  ),
                 ),
-                SliverToBoxAdapter(child: _buildFeatureList()),
-                const SliverToBoxAdapter(child: SizedBox(height: 120)),
-              ],
+              ),
             ),
-          ),
-        ],
+            // Top overlay
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildHeader(),
+                    _buildWeatherCard(),
+                    if (_showBanner) _buildAlertBanner(),
+                  ],
+                ),
+              ),
+            ),
+            // GPS fab
+            Positioned(
+              right: 14,
+              bottom: 200,
+              child: _mapFab(Icons.my_location_rounded, _detectGps),
+            ),
+            // Layer fab
+            Positioned(
+              right: 14,
+              bottom: 254,
+              child: _mapFab(Icons.layers_outlined, () {}),
+            ),
+            _buildTripSheet(),
+          ],
+        ),
       ),
       bottomNavigationBar: _buildBottomNav(),
     );
   }
 
-  // ── Orb BG ───────────────────────────────────────────────────
-  Widget _buildOrbBg() {
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: AnimatedBuilder(
-          animation: _orbCtrl,
-          builder: (_, __) {
-            final t = _orbCtrl.value;
-            return Stack(
-              children: [
-                Positioned(
-                  top: -80 + t * 38,
-                  left: -60 + t * 28,
-                  child: _orb(300, _P.b400, 0.16),
-                ),
-                Positioned(
-                  top: 180 + t * 28,
-                  right: -70 - t * 18,
-                  child: _orb(220, const Color(0xFF06B6D4), 0.14),
-                ),
-                Positioned(
-                  bottom: 280 - t * 22,
-                  left: 20 + t * 18,
-                  child: _orb(180, _P.b300, 0.13),
-                ),
-              ],
-            );
-          },
-        ),
+  // ─────────────────────────────────────────────────────────────
+  //  MAP
+  // ─────────────────────────────────────────────────────────────
+
+  Widget _buildMap() {
+    return FlutterMap(
+      mapController: _mapCtrl,
+      options: const MapOptions(
+        initialCenter: _medan,
+        initialZoom: 13,
+        interactionOptions: InteractionOptions(flags: InteractiveFlag.all),
       ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          subdomains: const ['a', 'b', 'c'],
+          userAgentPackageName: 'com.medanflow.app',
+          tileProvider: CancellableNetworkTileProvider(),
+          maxNativeZoom: 19,
+          keepBuffer: 2,
+          tileDisplay: const TileDisplay.fadeIn(
+            duration: Duration(milliseconds: 200),
+          ),
+        ),
+        MarkerLayer(markers: _buildMapMarkers()),
+      ],
     );
   }
 
-  Widget _orb(double size, Color color, double opacity) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      gradient: RadialGradient(
-        colors: [color.withOpacity(opacity), Colors.transparent],
+  List<Marker> _buildMapMarkers() {
+    final markers = [..._angkotMarkers];
+
+    if (_userLatLng != null) {
+      markers.add(
+        Marker(
+          point: _userLatLng!,
+          width: 50,
+          height: 50,
+          child: AnimatedBuilder(
+            animation: _pulseCtrl,
+            builder: (_, __) => Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: 44 + _pulseCtrl.value * 8,
+                  height: 44 + _pulseCtrl.value * 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _T.b500.withOpacity(0.12 + _pulseCtrl.value * 0.12),
+                  ),
+                ),
+                Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _T.b600,
+                    border: Border.all(color: Colors.white, width: 2.5),
+                    boxShadow: [
+                      BoxShadow(color: _T.b600.withOpacity(0.5), blurRadius: 8),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_destPlace != null) {
+      markers.add(
+        Marker(
+          point: LatLng(_destPlace!.lat, _destPlace!.lon),
+          width: 48,
+          height: 56,
+          child: Column(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _T.red,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(color: _T.red.withOpacity(0.5), blurRadius: 12),
+                  ],
+                  border: Border.all(color: Colors.white, width: 2.5),
+                ),
+                child: const Icon(
+                  Icons.flag_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+              Container(
+                width: 2.5,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: _T.red,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return markers;
+  }
+
+  Widget _mapFab(IconData icon, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
+      child: Icon(icon, color: _T.b700, size: 20),
     ),
   );
 
-  // ── Header ───────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  //  HEADER
+  // ─────────────────────────────────────────────────────────────
+
   Widget _buildHeader() {
     final now = DateTime.now();
     const days = [
@@ -724,879 +863,1325 @@ class _LandingPageState extends State<LandingPage>
       'Sabtu',
     ];
     const months = [
-      'Januari',
-      'Februari',
-      'Maret',
-      'April',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
       'Mei',
-      'Juni',
-      'Juli',
-      'Agustus',
-      'September',
-      'Oktober',
-      'November',
-      'Desember',
+      'Jun',
+      'Jul',
+      'Agu',
+      'Sep',
+      'Okt',
+      'Nov',
+      'Des',
     ];
     final dateStr =
         '${days[now.weekday % 7]}, ${now.day} ${months[now.month - 1]} ${now.year}';
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+    return Container(
+      key: _keyHeader,
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ShaderMask(
-                shaderCallback: (b) => const LinearGradient(
-                  colors: [_P.b600, Color(0xFF06B6D4)],
-                ).createShader(b),
-                child: const Text(
-                  'MedFlow',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-              ),
-              Text(
-                dateStr,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: _P.ink3,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          Container(key: _keyNotif, child: _notifBtn()),
-        ],
-      ),
-    );
-  }
-
-  Widget _notifBtn() {
-    return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const NotificationScreen()),
-      ),
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: _P.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _P.b100, width: 1.5),
-          boxShadow: [
-            BoxShadow(
-              color: _P.b500.withOpacity(0.10),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            const Center(
-              child: Icon(
-                Icons.notifications_none_outlined,
-                color: _P.b600,
-                size: 20,
-              ),
-            ),
-            if (_unreadNotif > 0)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  width: 9,
-                  height: 9,
+          // Logo + title
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Alert Banner ─────────────────────────────────────────────
-  Widget _buildAlertBanner() {
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 300),
-      child: _showCriticalBanner
-          ? Container(
-              margin: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-              padding: const EdgeInsets.fromLTRB(14, 13, 10, 13),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFFECACA), width: 1.5),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.warning_amber_rounded,
-                    color: Colors.red,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _bannerMessage,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFB91C1C),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        height: 1.4,
-                      ),
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.25),
+                      width: 1,
                     ),
                   ),
-                  GestureDetector(
-                    onTap: () => setState(() => _showCriticalBanner = false),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4),
-                      child: Text(
-                        '✕',
-                        style: TextStyle(
-                          color: Colors.red,
-                          fontWeight: FontWeight.w700,
+                  child: const Icon(
+                    Icons.directions_bus_filled_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'MedFlow',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                        height: 1,
+                      ),
+                    ),
+                    Text(
+                      dateStr,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: Colors.white.withOpacity(0.65),
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          // Notification bell
+          GestureDetector(
+            onTap: () => _push(const NotificationScreen()),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.2),
+                  width: 1,
+                ),
+              ),
+              child: Stack(
+                children: [
+                  const Center(
+                    child: Icon(
+                      Icons.notifications_outlined,
+                      color: Colors.white,
+                      size: 21,
+                    ),
+                  ),
+                  if (_unread > 0)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF87171),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
                         ),
                       ),
                     ),
-                  ),
                 ],
               ),
-            )
-          : const SizedBox.shrink(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  // ── Weather Card ──────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  //  WEATHER CARD
+  // ─────────────────────────────────────────────────────────────
+
   Widget _buildWeatherCard() {
-    return KeyedSubtree(key: _keyWeather, child: _buildWeatherCardContent());
-  }
-
-  Widget _buildWeatherCardContent() {
-    if (_isLoadingWeather) {
-      return Container(
-        margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-        height: 120,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [_P.b600, _P.b800, _P.dark],
-            stops: [0, 0.55, 1],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: _P.b600.withOpacity(0.32),
-              blurRadius: 24,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-        ),
-      );
-    }
-
-    if (_weatherData == null) return const SizedBox.shrink();
-
-    final iconType = _weatherData!['icon'] as String;
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+    return AnimatedContainer(
+      key: _keyWeather,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [_P.b600, _P.b800, _P.dark],
-          stops: [0.0, 0.55, 1.0],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(22),
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.5), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: _P.b600.withOpacity(0.30),
-            blurRadius: 28,
-            offset: const Offset(0, 8),
+            color: _T.navy.withOpacity(0.18),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(22),
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: const Alignment(0.85, -0.75),
-                    radius: 1.1,
-                    colors: [
-                      Colors.white.withOpacity(0.08),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'CUACA MEDAN',
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white54,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _weatherData!['condition'] as String,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                              color: Colors.white,
-                              height: 1.1,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.location_on_outlined,
-                                color: Colors.white54,
-                                size: 11,
-                              ),
-                              const SizedBox(width: 2),
-                              Text(
-                                _weatherData!['location'] as String,
-                                style: const TextStyle(
-                                  fontSize: 10.5,
-                                  color: Colors.white54,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 64,
-                          height: 64,
-                          child: _buildAnimatedWeatherIcon(iconType),
-                        ),
-                        const SizedBox(height: 2),
-                        RichText(
-                          text: TextSpan(
-                            children: [
-                              TextSpan(
-                                text: (_weatherData!['temp'] as String)
-                                    .replaceAll('°C', ''),
-                                style: const TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
-                                  height: 1,
-                                ),
-                              ),
-                              const TextSpan(
-                                text: '°',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white60,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 10),
-                Container(height: 1, color: Colors.white.withOpacity(0.12)),
-
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Row(
-                    children: [
-                      _wxStat(
-                        Icons.water_drop_outlined,
-                        _weatherData!['humidity'] as String,
-                        'Lembab',
-                      ),
-                      Container(
-                        width: 1,
-                        height: 26,
-                        color: Colors.white.withOpacity(0.13),
-                      ),
-                      _wxStat(
-                        Icons.air_rounded,
-                        _weatherData!['wind_speed'] as String,
-                        'Angin',
-                      ),
-                    ],
-                  ),
-                ),
-
-                if (_weatherTitle != null || _weatherTips.isNotEmpty)
-                  _buildWeatherInfoBox(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWeatherInfoBox() {
-    final hasTitle = _weatherTitle != null && _weatherTitle!.isNotEmpty;
-    final hasTips = _weatherTips.isNotEmpty;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.10), width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (hasTitle)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.only(top: 1),
-                  child: Icon(
-                    Icons.info_outline_rounded,
-                    color: Colors.white70,
-                    size: 12,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: Text(
-                    _weatherTitle!,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                      height: 1.3,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          if (hasTitle && hasTips)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child: Container(
-                height: 1,
-                color: Colors.white.withOpacity(0.10),
-              ),
-            ),
-          if (hasTips)
-            Wrap(
-              spacing: 6,
-              runSpacing: 5,
-              children: _weatherTips.map(_buildTipChip).toList(),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTipChip(String tip) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 4,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.70),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            tip,
-            style: const TextStyle(
-              fontSize: 10.5,
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-              height: 1.0,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAnimatedWeatherIcon(String iconType) {
-    switch (iconType) {
-      case 'rainy':
-        return const RainyWeatherIcon(size: 64);
-      case 'cloudy':
-        return const CloudySunIcon(size: 64);
-      default:
-        return const SunnyIcon(size: 64);
-    }
-  }
-
-  Widget _wxStat(IconData icon, String value, String label) => Expanded(
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, color: Colors.white54, size: 13),
-        const SizedBox(width: 5),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-              ),
-            ),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 9.5, color: Colors.white54),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-
-  // ── Section Label ────────────────────────────────────────────
-  Widget _sectionLabel(String label, {String? trailing}) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              color: _P.ink2,
-              letterSpacing: 0.5,
-            ),
-          ),
-          if (trailing != null)
-            Text(
-              trailing,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: _P.b600,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ── Quick Actions ────────────────────────────────────────────
-  Widget _buildQuickActions() {
-    final items = [
-      _QA(
-        'Rute\nPintar',
-        [const Color(0xFFEFF6FF), const Color(0xFFDBEAFE)],
-        const Icon(Icons.alt_route_rounded, color: _P.b400, size: 26),
-        () => _push(const RouteRecommendationScreen()),
-        _keyQuickRute,
-      ),
-      _QA(
-        'Pantau\nAngkot',
-        [const Color(0xFFE0F2FE), const Color(0xFFBAE6FD)],
-        const Icon(
-          Icons.directions_bus_rounded,
-          color: Color(0xFF0EA5E9),
-          size: 26,
-        ),
-        () => _push(const AngkotTrackingScreen()),
-        _keyQuickAngkot,
-      ),
-      _QA(
-        'Kondisi\nLalu Lintas',
-        [const Color(0xFFF0FDF4), const Color(0xFFDCFCE7)],
-        const Icon(Icons.grid_view_rounded, color: Color(0xFF16A34A), size: 26),
-        () => _push(const TrafficHeatmapScreen()),
-        GlobalKey(),
-      ),
-      _QA(
-        'Prediksi\nWaktu',
-        [const Color(0xFFFFF7ED), const Color(0xFFFED7AA)],
-        const Icon(Icons.schedule_rounded, color: Color(0xFFEA580C), size: 26),
-        () => _push(const TravelTimePredictionScreen()),
-        GlobalKey(),
-      ),
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-      child: Row(
-        children: List.generate(items.length, (i) {
-          final a = items[i];
-          return Expanded(
-            child: GestureDetector(
-              onTap: a.onTap,
-              child: Container(
-                key: a.targetKey,
-                margin: EdgeInsets.only(right: i < items.length - 1 ? 10 : 0),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  color: _P.card,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: _P.b100, width: 1.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _P.b500.withOpacity(0.06),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: a.gradient,
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Center(child: a.iconWidget),
-                    ),
-                    const SizedBox(height: 9),
-                    Text(
-                      a.label,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: _P.ink,
-                        height: 1.25,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-
-  // ── Traffic Strip ────────────────────────────────────────────
-  Widget _buildTrafficStrip() {
-    return GestureDetector(
-      onTap: () => _push(const TrafficHeatmapScreen()),
-      child: Container(
-        key: _keyTrafficStrip,
-        margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          color: _P.card,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _P.b100, width: 1.5),
-          boxShadow: [
-            BoxShadow(
-              color: _P.b500.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: _P.b50,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Center(
-                child: Icon(Icons.show_chart_rounded, color: _P.b600, size: 22),
-              ),
-            ),
-            const SizedBox(width: 13),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: _weatherLoading
+          ? Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    'Prediksi Kemacetan',
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w800,
-                      color: _P.b700,
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: _T.b600,
                     ),
                   ),
-                  SizedBox(height: 2),
+                  const SizedBox(width: 10),
                   Text(
-                    'Data real-time 30 menit ke depan',
+                    'Memuat data cuaca...',
                     style: TextStyle(
-                      fontSize: 11.5,
-                      color: _P.ink3,
+                      fontSize: 12.5,
+                      color: _T.ink3,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
               ),
+            )
+          : _weather == null
+          ? const SizedBox.shrink()
+          : _buildWeatherContent(),
+    );
+  }
+
+  Widget _buildWeatherContent() {
+    final w = _weather!;
+    IconData weatherIcon;
+    Color iconColor;
+    Color iconBg;
+    LinearGradient accentGrad;
+
+    switch (w.icon) {
+      case 'rainy':
+        weatherIcon = Icons.water_drop_rounded;
+        iconColor = const Color(0xFF2563EB);
+        iconBg = const Color(0xFFDBEAFE);
+        accentGrad = const LinearGradient(
+          colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
+        );
+        break;
+      case 'cloudy':
+        weatherIcon = Icons.cloud_rounded;
+        iconColor = const Color(0xFF64748B);
+        iconBg = const Color(0xFFF1F5F9);
+        accentGrad = const LinearGradient(
+          colors: [Color(0xFF94A3B8), Color(0xFF64748B)],
+        );
+        break;
+      default:
+        weatherIcon = Icons.wb_sunny_rounded;
+        iconColor = const Color(0xFFF59E0B);
+        iconBg = const Color(0xFFFEF3C7);
+        accentGrad = const LinearGradient(
+          colors: [Color(0xFFF59E0B), Color(0xFFEA580C)],
+        );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: () => setState(() => _weatherExpanded = !_weatherExpanded),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: iconBg,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Icon(weatherIcon, color: iconColor, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        w.title,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: _T.ink,
+                          height: 1.1,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        w.location,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          color: _T.ink4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _weatherChip(w.temp, accentGrad),
+                const SizedBox(width: 6),
+                AnimatedRotation(
+                  turns: _weatherExpanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 250),
+                  child: const Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: _T.ink4,
+                    size: 18,
+                  ),
+                ),
+              ],
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: _P.b600,
-                borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        AnimatedCrossFade(
+          duration: const Duration(milliseconds: 280),
+          crossFadeState: _weatherExpanded
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          firstChild: const SizedBox.shrink(),
+          secondChild: _buildWeatherExpanded(w, iconColor, accentGrad),
+        ),
+      ],
+    );
+  }
+
+  Widget _weatherChip(String value, LinearGradient grad) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      gradient: grad,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(
+      value,
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w900,
+        color: Colors.white,
+      ),
+    ),
+  );
+
+  Widget _buildWeatherExpanded(
+    _WeatherData w,
+    Color iconColor,
+    LinearGradient grad,
+  ) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _T.b50,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _statItem(Icons.thermostat_rounded, 'Suhu', w.temp, iconColor),
+              _vertDivider(),
+              _statItem(
+                Icons.water_drop_outlined,
+                'Kelembapan',
+                w.humidity,
+                const Color(0xFF0EA5E9),
               ),
-              child: const Text(
-                'Cek →',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
+              _vertDivider(),
+              _statItem(
+                Icons.air_rounded,
+                'Angin',
+                w.windSpeed,
+                const Color(0xFF8B5CF6),
+              ),
+            ],
+          ),
+          if (w.tips.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: _T.b100),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: iconColor.withOpacity(0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.tips_and_updates_outlined,
+                    size: 12,
+                    color: iconColor,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  'Tips Hari Ini',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: _T.ink2,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ...w.tips.map(
+              (tip) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 5,
+                      height: 5,
+                      margin: const EdgeInsets.only(top: 5, right: 7),
+                      decoration: BoxDecoration(
+                        color: iconColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        tip,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: _T.ink3,
+                          fontWeight: FontWeight.w600,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  // ── Feature List ─────────────────────────────────────────────
-  Widget _buildFeatureList() {
-    final list = [
-      _Feat(
-        Icons.analytics_outlined,
-        [_P.b50, _P.b100],
-        _P.b500,
-        'Prediksi Waktu Tempuh',
-        'Estimasi perjalanan akurat berbasis AI',
-        null,
-        null,
-        null,
-        () => _push(const TravelTimePredictionScreen()),
-      ),
-      _Feat(
-        Icons.grid_view_rounded,
-        [const Color(0xFFE0F2FE), const Color(0xFFBAE6FD)],
-        const Color(0xFF0EA5E9),
-        'Kondisi Lalu Lintas',
-        'Visualisasi kemacetan jalanan Medan',
-        null,
-        null,
-        null,
-        () => _push(const TrafficHeatmapScreen()),
-      ),
-      _Feat(
-        Icons.directions_bus_outlined,
-        [const Color(0xFFF0FDF4), const Color(0xFFDCFCE7)],
-        const Color(0xFF16A34A),
-        'Lokasi Angkot Real-time',
-        'Pantau armada & estimasi kedatangan',
-        'Live',
-        const Color(0xFFDCFCE7),
-        const Color(0xFF15803D),
-        () => _push(const AngkotTrackingScreen()),
-      ),
-    ];
+  Widget _statItem(IconData icon, String label, String value, Color color) =>
+      Expanded(
+        child: Column(
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: _T.ink,
+              ),
+            ),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 9.5,
+                color: _T.ink4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 22),
-      child: Column(
-        children: list
-            .map(
-              (f) => GestureDetector(
-                onTap: f.onTap,
+  Widget _vertDivider() => Container(
+    width: 1,
+    height: 36,
+    color: _T.b200,
+    margin: const EdgeInsets.symmetric(horizontal: 4),
+  );
+
+  // ─────────────────────────────────────────────────────────────
+  //  ALERT BANNER
+  // ─────────────────────────────────────────────────────────────
+
+  Widget _buildAlertBanner() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: _T.redBg.withOpacity(0.95),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _T.red.withOpacity(0.3), width: 1.5),
+        boxShadow: [BoxShadow(color: _T.red.withOpacity(0.10), blurRadius: 8)],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: _T.red.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.warning_amber_rounded,
+              color: _T.red,
+              size: 16,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _bannerMsg,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFFB91C1C),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => setState(() => _showBanner = false),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Icon(
+                Icons.close_rounded,
+                color: _T.red.withOpacity(0.7),
+                size: 16,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  //  TRIP SHEET
+  // ─────────────────────────────────────────────────────────────
+
+  Widget _buildTripSheet() {
+    return DraggableScrollableSheet(
+      controller: _sheetCtrl,
+      initialChildSize: _sizeCollapsed,
+      minChildSize: _sizeCollapsed,
+      maxChildSize: _sizeResults,
+      snap: true,
+      snapSizes: const [_sizeCollapsed, _sizeSearch, _sizeResults],
+      builder: (ctx, scrollCtrl) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: _T.card,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            boxShadow: [
+              BoxShadow(
+                color: Color(0x1A1D4ED8),
+                blurRadius: 32,
+                offset: Offset(0, -8),
+              ),
+            ],
+          ),
+          child: ListView(
+            controller: scrollCtrl,
+            padding: EdgeInsets.zero,
+            physics: const ClampingScrollPhysics(),
+            children: [
+              // Handle
+              Center(
                 child: Container(
-                  margin: const EdgeInsets.only(bottom: 11),
-                  padding: const EdgeInsets.all(15),
+                  margin: const EdgeInsets.symmetric(vertical: 10),
+                  width: 36,
+                  height: 4,
                   decoration: BoxDecoration(
-                    color: _P.card,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _P.b100, width: 1.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _P.b500.withOpacity(0.05),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    color: _T.ink5,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Row(
+                ),
+              ),
+
+              if (_sheetPhase == 0) _buildCollapsedContent(),
+
+              if (_sheetPhase >= 1) ...[
+                _buildSearchRow(),
+                const SizedBox(height: 8),
+                if (_suggestions.isNotEmpty || _loadingSugg)
+                  _buildSuggestions(),
+              ],
+
+              if (_sheetPhase == 3 && _tripResult != null) ...[
+                const SizedBox(height: 4),
+                _buildTripResults(),
+              ],
+
+              const SizedBox(height: 120),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Collapsed content: rute pill + driver login ───────────────
+  Widget _buildCollapsedContent() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // ── Cari rute pill ──────────────────────────────────────
+        GestureDetector(
+          key: _keyStartTrip,
+          onTap: _expandToSearch,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [_T.b500, _T.b800],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: [
+                BoxShadow(
+                  color: _T.b700.withOpacity(0.40),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.2),
+                      width: 1,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.near_me_rounded,
+                    color: Colors.white,
+                    size: 21,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: f.iconBg,
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Icon(f.icon, color: f.iconColor, size: 24),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              f.title,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w800,
-                                color: _P.ink,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              f.subtitle,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: _P.ink3,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
+                      Text(
+                        'Mau pergi ke mana?',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
-                      Row(
-                        children: [
-                          if (f.badge != null) ...[
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 9,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: f.badgeBg,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                f.badge!,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                  color: f.badgeFg,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: _P.b50,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Icon(
-                              Icons.chevron_right_rounded,
-                              color: _P.b400,
-                              size: 18,
-                            ),
-                          ),
-                        ],
+                      SizedBox(height: 2),
+                      Text(
+                        'Tap untuk cari rute angkot tercepat',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
                 ),
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.keyboard_arrow_up_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Driver Login Button ─────────────────────────────────
+        GestureDetector(
+          onTap: () => _push(const LoginScreen()),
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _T.b100, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: _T.b500.withOpacity(0.07),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // Icon kiri
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: _T.b50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _T.b100),
+                  ),
+                  child: const Icon(
+                    Icons.drive_eta_rounded,
+                    color: _T.b600,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Label
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Login sebagai Driver',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: _T.b700,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Akses dashboard & tracking angkot',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: _T.ink4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Badge "Portal"
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _T.b50,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _T.b200),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Portal',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: _T.b600,
+                        ),
+                      ),
+                      SizedBox(width: 3),
+                      Icon(
+                        Icons.arrow_forward_ios_rounded,
+                        size: 10,
+                        color: _T.b600,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Search row ───────────────────────────────────────────────
+  Widget _buildSearchRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      child: Column(
+        children: [
+          // Search card
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _T.b50,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _T.b100, width: 1.5),
+            ),
+            child: Column(
+              children: [
+                // Origin
+                Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: _T.b100,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.my_location_rounded,
+                        color: _T.b600,
+                        size: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _originIsGps
+                          ? GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _originIsGps = false;
+                                  _originCtrl.clear();
+                                  _searchingFor = true;
+                                });
+                                _originFocus.requestFocus();
+                              },
+                              child: Text(
+                                _originLabel,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _T.ink,
+                                ),
+                              ),
+                            )
+                          : TextField(
+                              controller: _originCtrl,
+                              focusNode: _originFocus,
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                color: _T.ink,
+                              ),
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                border: InputBorder.none,
+                                hintText: 'Cari lokasi asal...',
+                                hintStyle: TextStyle(
+                                  color: _T.ink4,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              onTap: () => setState(() => _searchingFor = true),
+                              onChanged: (v) => _onSearchChanged(v, true),
+                            ),
+                    ),
+                    if (!_originIsGps)
+                      GestureDetector(
+                        onTap: () => setState(() {
+                          _originIsGps = true;
+                          _originLabel = _userLatLng != null
+                              ? 'Lokasi Saya Saat Ini'
+                              : 'Lokasi Saya';
+                          _originPlace = null;
+                          _originCtrl.clear();
+                          _suggestions = [];
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: _T.b50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: _T.b200),
+                          ),
+                          child: const Icon(
+                            Icons.gps_fixed_rounded,
+                            size: 14,
+                            color: _T.b600,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+
+                // Connector
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 16),
+                      Column(
+                        children: List.generate(
+                          4,
+                          (_) => Container(
+                            margin: const EdgeInsets.symmetric(vertical: 1.5),
+                            width: 2,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: _T.b300,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: _swapPlaces,
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: _T.card,
+                            borderRadius: BorderRadius.circular(9),
+                            border: Border.all(color: _T.b200, width: 1.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _T.b500.withOpacity(0.08),
+                                blurRadius: 6,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            Icons.swap_vert_rounded,
+                            color: _T.b600,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Destination
+                Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: _T.redBg,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.flag_rounded,
+                        color: _T.red,
+                        size: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _destCtrl,
+                        focusNode: _destFocus,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: _T.ink,
+                        ),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: 'Cari tujuan...',
+                          hintStyle: TextStyle(
+                            color: _T.ink4,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        onTap: () => setState(() => _searchingFor = false),
+                        onChanged: (v) => _onSearchChanged(v, false),
+                      ),
+                    ),
+                    if (_destCtrl.text.isNotEmpty)
+                      GestureDetector(
+                        onTap: () {
+                          _destCtrl.clear();
+                          setState(() {
+                            _destPlace = null;
+                            _suggestions = [];
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            size: 14,
+                            color: _T.ink3,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          // Cari button
+          GestureDetector(
+            onTap: _tripLoading ? null : _fetchTripResults,
+            child: Container(
+              width: double.infinity,
+              height: 52,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [_T.b500, _T.b800],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: _T.b700.withOpacity(0.36),
+                    blurRadius: 16,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
               ),
-            )
-            .toList(),
+              child: Center(
+                child: _tripLoading
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2.5,
+                        ),
+                      )
+                    : const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.alt_route_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'CARI JALUR TERCEPAT',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ),
+
+          if (_sheetPhase >= 1)
+            TextButton(
+              onPressed: _collapseSheet,
+              child: const Text(
+                'Batalkan',
+                style: TextStyle(
+                  color: _T.ink4,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 
-  // ── Bottom Nav ───────────────────────────────────────────────
-  Widget _buildBottomNav() {
+  void _swapPlaces() {
+    setState(() {
+      final tmpPlace = _originPlace;
+      final tmpIsGps = _originIsGps;
+      final tmpText = _originCtrl.text;
+
+      if (_destPlace != null) {
+        _originPlace = _destPlace;
+        _originIsGps = false;
+        _originLabel = _destPlace!.short;
+        _originCtrl.text = _destPlace!.short;
+      } else {
+        _originPlace = null;
+        _originIsGps = false;
+        _originLabel = '';
+        _originCtrl.clear();
+      }
+
+      if (!tmpIsGps && tmpPlace != null) {
+        _destPlace = tmpPlace;
+        _destCtrl.text = tmpText;
+      } else {
+        _destPlace = null;
+        _destCtrl.clear();
+      }
+      _suggestions = [];
+    });
+  }
+
+  // ── Suggestions ──────────────────────────────────────────────
+  Widget _buildSuggestions() {
     return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [_P.bg.withOpacity(0), _P.bg, _P.bg],
-        ),
+        color: _T.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _T.b100, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: _T.b500.withOpacity(0.10),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
-      child: SafeArea(
-        top: false,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: _loadingSugg
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: _T.b500,
+                    ),
+                  ),
+                ),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (int i = 0; i < _suggestions.length; i++) ...[
+                    InkWell(
+                      onTap: () => _selectPlace(_suggestions[i], _searchingFor),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: _searchingFor ? _T.b50 : _T.redBg,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                i == 0
+                                    ? Icons.location_on_rounded
+                                    : Icons.place_outlined,
+                                size: 17,
+                                color: _searchingFor ? _T.b600 : _T.red,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _suggestions[i].short,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: _T.ink,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    _suggestions[i].display,
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      color: _T.ink4,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(
+                              Icons.north_west_rounded,
+                              size: 13,
+                              color: _T.ink4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (i < _suggestions.length - 1)
+                      Divider(height: 1, color: _T.b50, indent: 52),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  //  TRIP RESULTS
+  // ─────────────────────────────────────────────────────────────
+
+  Widget _buildTripResults() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionHeader(
+            'Angkot Tercepat',
+            Icons.directions_bus_rounded,
+            _T.b600,
+            onTap: () => _push(const AngkotTrackingScreen()),
+          ),
+          const SizedBox(height: 10),
+          _buildAngkotSection(),
+          const SizedBox(height: 18),
+
+          _sectionHeader(
+            'Kondisi Lalu Lintas',
+            Icons.grid_view_rounded,
+            _T.green,
+            onTap: () => _push(const TrafficHeatmapScreen()),
+          ),
+          const SizedBox(height: 10),
+          _buildTrafficSection(),
+          const SizedBox(height: 18),
+
+          _sectionHeader(
+            'Estimasi Waktu',
+            Icons.schedule_rounded,
+            _T.orange,
+            onTap: () => _push(const TravelTimePredictionScreen()),
+          ),
+          const SizedBox(height: 10),
+          _buildEstimateSection(),
+          const SizedBox(height: 16),
+
+          // Cari rute lain
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _sheetPhase = 1;
+                _tripResult = null;
+              });
+              _sheetCtrl.animateTo(
+                _sizeSearch,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutCubic,
+              );
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                color: _T.b50,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _T.b200, width: 1.5),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.refresh_rounded, size: 16, color: _T.b600),
+                  SizedBox(width: 8),
+                  Text(
+                    'Cari Rute Lain',
+                    style: TextStyle(
+                      color: _T.b600,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(
+    String title,
+    IconData icon,
+    Color color, {
+    VoidCallback? onTap,
+  }) {
+    return Row(
+      children: [
+        Container(
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.92),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: _P.b500.withOpacity(0.14), width: 1.5),
+            color: color.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: color, size: 16),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w800,
+              color: _T.ink,
+            ),
+          ),
+        ),
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: _T.b50,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _T.b100),
+            ),
+            child: const Text(
+              'Detail →',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: _T.b600,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAngkotSection() {
+    final routes = (_tripResult!['routes'] as List?) ?? [];
+    if (routes.isEmpty)
+      return _emptyCard('Belum ada angkot aktif di rute ini.');
+    return Column(
+      children: routes.take(2).map<Widget>((r) {
+        final full = (r['crowd_status'] ?? '') == 'Penuh';
+        final sCo = full ? _T.red : _T.green;
+        final sBg = full ? _T.redBg : _T.greenBg;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _T.card,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: _T.ink5, width: 1),
             boxShadow: [
               BoxShadow(
-                color: _P.b500.withOpacity(0.14),
-                blurRadius: 32,
-                offset: const Offset(0, 8),
-              ),
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: _T.b500.withOpacity(0.05),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -1604,25 +2189,440 @@ class _LandingPageState extends State<LandingPage>
           ),
           child: Row(
             children: [
-              _nbItem(0, Icons.home_rounded, 'Beranda', onTap: () {}),
-              _nbItem(
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [_T.b100, _T.b200]),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.directions_bus_filled_rounded,
+                  color: _T.b700,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Angkot ${r['angkot_number'] ?? '-'}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: _T.ink,
+                      ),
+                    ),
+                    Text(
+                      r['route_name'] ?? 'Rute Medan',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: _T.ink3,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: sBg,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      (r['crowd_status'] ?? '-').toString().toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        color: sCo,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${r['eta_minutes'] ?? '-'} mnt',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      color: _T.ink2,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildTrafficSection() {
+    final hm = _tripResult!['heatmap'];
+    final data = (hm?['data'] as List?) ?? [];
+    final total = data.length;
+    int macet = 0, padat = 0, lancar = 0;
+    for (final d in data) {
+      switch (d['congestion_level']) {
+        case 'macet':
+          macet++;
+          break;
+        case 'padat':
+          padat++;
+          break;
+        default:
+          lancar++;
+          break;
+      }
+    }
+    final pM = total > 0 ? macet / total : 0.0;
+    final pP = total > 0 ? padat / total : 0.0;
+    final pL = total > 0 ? lancar / total : 1.0;
+
+    String statusText;
+    Color statusColor;
+    IconData statusIcon;
+    if (pM > 0.4) {
+      statusText = 'Kondisi Macet';
+      statusColor = _T.red;
+      statusIcon = Icons.traffic_rounded;
+    } else if (pP > 0.4) {
+      statusText = 'Padat Merayap';
+      statusColor = _T.orange;
+      statusIcon = Icons.slow_motion_video_rounded;
+    } else {
+      statusText = 'Cukup Lancar';
+      statusColor = _T.green;
+      statusIcon = Icons.check_circle_outline_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _T.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _T.ink5, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: _T.b500.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(statusIcon, color: statusColor, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                statusText,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: statusColor,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$total titik',
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  color: _T.ink4,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              height: 10,
+              child: Row(
+                children: [
+                  _barSeg(pM, _T.red),
+                  _barSeg(pP, _T.orange),
+                  _barSeg(pL, _T.green),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _dot(_T.red, 'Macet'),
+              const SizedBox(width: 14),
+              _dot(_T.orange, 'Padat'),
+              const SizedBox(width: 14),
+              _dot(_T.green, 'Lancar'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _barSeg(double flex, Color c) => Expanded(
+    flex: (flex * 100).round().clamp(1, 100),
+    child: ColoredBox(color: c),
+  );
+
+  Widget _dot(Color c, String label) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 4),
+      Text(
+        label,
+        style: const TextStyle(
+          fontSize: 10.5,
+          color: _T.ink3,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ],
+  );
+
+  Widget _buildEstimateSection() {
+    final est = _tripResult!['estimate'] as Map<String, dynamic>?;
+    if (est == null) return _emptyCard('Data estimasi belum tersedia.');
+
+    final menit = (est['predicted_time'] as String? ?? '0').replaceAll(
+      RegExp(r'[^0-9]'),
+      '',
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _T.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _T.ink5, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: _T.b500.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [_T.b500, _T.b800],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: _T.b700.withOpacity(0.30),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Text(
+                  menit,
+                  style: const TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    height: 1,
+                  ),
+                ),
+                const Text(
+                  'MENIT',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  est['congestion_level'] as String? ?? 'Normal',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: _T.ink,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                _infoRow(
+                  Icons.straighten_rounded,
+                  'Jarak',
+                  '${est['distance'] ?? '-'}',
+                ),
+                const SizedBox(height: 3),
+                _infoRow(
+                  Icons.timer_outlined,
+                  'Delay',
+                  '${est['delay'] ?? '-'}',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData icon, String label, String value) => Row(
+    children: [
+      Icon(icon, size: 13, color: _T.ink4),
+      const SizedBox(width: 4),
+      Text(
+        '$label: ',
+        style: const TextStyle(
+          fontSize: 11,
+          color: _T.ink4,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      Text(
+        value,
+        style: const TextStyle(
+          fontSize: 11.5,
+          color: _T.ink3,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ],
+  );
+
+  Widget _emptyCard(String msg) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: _T.b50,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: _T.b100),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.info_outline_rounded, size: 16, color: _T.ink4),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            msg,
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: _T.ink3,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  // ─────────────────────────────────────────────────────────────
+  //  BOTTOM NAV
+  // ─────────────────────────────────────────────────────────────
+
+  Widget _buildBottomNav() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [_T.bg.withOpacity(0), _T.bg, _T.bg],
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: _T.ink5, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: _T.b600.withOpacity(0.12),
+                blurRadius: 24,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              _navItem(0, Icons.home_rounded, 'Beranda', onTap: _collapseSheet),
+              _navItem(
                 1,
-                Icons.search_rounded,
-                'Rute Pintar',
+                Icons.alt_route_rounded,
+                'Rute',
                 onTap: () => _push(const RouteRecommendationScreen()),
               ),
-              _nbFab(),
-              _nbItem(
+              // Center FAB — Angkot
+              GestureDetector(
+                key: _keyNavAngkot,
+                onTap: () => _push(const AngkotTrackingScreen()),
+                child: Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [_T.b500, _T.b800],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _T.b700.withOpacity(0.45),
+                        blurRadius: 18,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.directions_bus_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ),
+              _navItem(
                 3,
                 Icons.show_chart_rounded,
-                'Prediksi',
+                'Lalu Lintas',
+                key: _keyNavTraffic,
                 onTap: () => _push(const TrafficHeatmapScreen()),
               ),
-              _nbItem(
+              _navItem(
                 4,
-                Icons.lock_outline_rounded,
-                'Login',
-                onTap: () => _push(const LoginScreen()),
+                Icons.schedule_rounded,
+                'Estimasi',
+                onTap: () => _push(const TravelTimePredictionScreen()),
               ),
             ],
           ),
@@ -1631,15 +2631,17 @@ class _LandingPageState extends State<LandingPage>
     );
   }
 
-  Widget _nbItem(
+  Widget _navItem(
     int idx,
     IconData icon,
     String label, {
+    Key? key,
     required VoidCallback onTap,
   }) {
     final on = _activeNav == idx;
     return Expanded(
       child: GestureDetector(
+        key: key,
         onTap: () {
           setState(() => _activeNav = idx);
           onTap();
@@ -1647,22 +2649,22 @@ class _LandingPageState extends State<LandingPage>
         behavior: HitTestBehavior.opaque,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 5),
+          padding: const EdgeInsets.symmetric(vertical: 7),
           decoration: BoxDecoration(
-            color: on ? _P.b50 : Colors.transparent,
+            color: on ? _T.b50 : Colors.transparent,
             borderRadius: BorderRadius.circular(22),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: on ? _P.b600 : _P.ink4, size: 20),
+              Icon(icon, color: on ? _T.b600 : _T.ink4, size: 20),
               const SizedBox(height: 3),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.w800,
-                  color: on ? _P.b600 : _P.ink4,
+                  color: on ? _T.b600 : _T.ink4,
                 ),
               ),
             ],
@@ -1672,75 +2674,6 @@ class _LandingPageState extends State<LandingPage>
     );
   }
 
-  Widget _nbFab() {
-    return GestureDetector(
-      onTap: () => _push(const AngkotTrackingScreen()),
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [_P.b500, _P.b700],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: _P.b600.withOpacity(0.40),
-              blurRadius: 18,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: const Icon(
-          Icons.gps_fixed_rounded,
-          color: Colors.white,
-          size: 22,
-        ),
-      ),
-    );
-  }
-
   void _push(Widget screen) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
-}
-
-// ── Data model helpers ────────────────────────────────────────
-class _QA {
-  final String label;
-  final List<Color> gradient;
-  final Widget iconWidget;
-  final VoidCallback onTap;
-  final GlobalKey targetKey;
-  const _QA(
-    this.label,
-    this.gradient,
-    this.iconWidget,
-    this.onTap,
-    this.targetKey,
-  );
-}
-
-class _Feat {
-  final IconData icon;
-  final List<Color> iconBg;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-  final String? badge;
-  final Color? badgeBg;
-  final Color? badgeFg;
-  final VoidCallback onTap;
-  const _Feat(
-    this.icon,
-    this.iconBg,
-    this.iconColor,
-    this.title,
-    this.subtitle,
-    this.badge,
-    this.badgeBg,
-    this.badgeFg,
-    this.onTap,
-  );
 }

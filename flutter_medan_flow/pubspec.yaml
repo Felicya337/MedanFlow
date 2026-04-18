@@ -11,13 +11,13 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.2
-  http: ^1.1.0
+  http: ^1.2.0
   provider: ^6.1.1
   shared_preferences: ^2.3.0
-  geolocator: ^10.1.0
+  geolocator: ^11.0.0
   flutter_map: ^6.1.0
   latlong2: ^0.9.1
-  flutter_map_cancellable_tile_provider: ^2.0.0  # ← FIXED: was ^2.0.0
+  flutter_map_cancellable_tile_provider: ^2.0.0
 
 dev_dependencies:
   flutter_test:

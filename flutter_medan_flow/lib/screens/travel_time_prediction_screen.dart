@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 
 // ─────────────────────────────────────────────
@@ -22,6 +25,32 @@ class _P {
   static const dark = Color(0xFF0F2878);
 }
 
+// ─────────────────────────────────────────────
+// Model untuk hasil pencarian Nominatim
+// ─────────────────────────────────────────────
+class _PlaceSuggestion {
+  final String displayName;
+  final double lat;
+  final double lon;
+
+  const _PlaceSuggestion({
+    required this.displayName,
+    required this.lat,
+    required this.lon,
+  });
+
+  factory _PlaceSuggestion.fromJson(Map<String, dynamic> json) {
+    return _PlaceSuggestion(
+      displayName: json['display_name'] as String,
+      lat: double.parse(json['lat'] as String),
+      lon: double.parse(json['lon'] as String),
+    );
+  }
+
+  /// Nama singkat: hanya bagian pertama sebelum koma
+  String get shortName => displayName.split(',').first.trim();
+}
+
 class TravelTimePredictionScreen extends StatefulWidget {
   const TravelTimePredictionScreen({super.key});
 
@@ -30,10 +59,14 @@ class TravelTimePredictionScreen extends StatefulWidget {
       _TravelTimePredictionScreenState();
 }
 
-class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
-    with SingleTickerProviderStateMixin {
+class _TravelTimePredictionScreenState
+    extends State<TravelTimePredictionScreen> {
   // ── Controllers ───────────────────────────────────────
   final MapController _mapController = MapController();
+  final TextEditingController _originTextCtrl = TextEditingController();
+  final TextEditingController _destTextCtrl = TextEditingController();
+  final FocusNode _originFocus = FocusNode();
+  final FocusNode _destFocus = FocusNode();
 
   // ── Constants ─────────────────────────────────────────
   static const _medanCenter = LatLng(3.5952, 98.6722);
@@ -42,20 +75,234 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
   /// 0 = pilih asal, 1 = pilih tujuan, 2 = tampilkan hasil
   int _step = 0;
   bool _isLoading = false;
+  bool _isLocating = false; // sedang ambil GPS
 
   LatLng? _originPoint;
   LatLng? _destPoint;
+  String _originLabel = '';
+  String _destLabel = '';
   Map<String, dynamic>? _predictionData;
   List<LatLng> _routePoints = [];
 
-  /// ⚡ FIX: Tidak pakai setState — hanya di-update saat tombol diklik
   LatLng _currentMapCenter = _medanCenter;
+
+  // ── Autocomplete ──────────────────────────────────────
+  List<_PlaceSuggestion> _originSuggestions = [];
+  List<_PlaceSuggestion> _destSuggestions = [];
+  bool _showOriginSuggestions = false;
+  bool _showDestSuggestions = false;
+  Timer? _debounce;
 
   // ── Lifecycle ─────────────────────────────────────────
   @override
+  void initState() {
+    super.initState();
+    // Auto-detect lokasi saat pertama buka
+    _autoDetectLocation();
+  }
+
+  @override
   void dispose() {
-    _mapController.dispose(); // ⚡ FIX: Dispose untuk hindari memory leak
+    _mapController.dispose();
+    _originTextCtrl.dispose();
+    _destTextCtrl.dispose();
+    _originFocus.dispose();
+    _destFocus.dispose();
+    _debounce?.cancel();
     super.dispose();
+  }
+
+  // ── GPS / Location ────────────────────────────────────
+  Future<void> _autoDetectLocation() async {
+    setState(() => _isLocating = true);
+    try {
+      // Cek & minta permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever ||
+          permission == LocationPermission.denied) {
+        if (mounted) {
+          _showSnackBar('Izin lokasi ditolak. Pilih lokasi manual di peta.');
+        }
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
+      );
+
+      final latLng = LatLng(pos.latitude, pos.longitude);
+
+      // Reverse geocode untuk nama lokasi
+      final label = await _reverseGeocode(latLng);
+
+      if (mounted) {
+        setState(() {
+          _originPoint = latLng;
+          _originLabel = label;
+          _originTextCtrl.text = label;
+          _currentMapCenter = latLng;
+          // Langsung ke step 1 (pilih tujuan)
+          _step = 1;
+        });
+        _mapController.move(latLng, 15.0);
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Tidak bisa ambil lokasi GPS. Pilih manual di peta.');
+      }
+    } finally {
+      if (mounted) setState(() => _isLocating = false);
+    }
+  }
+
+  /// Mengambil lokasi GPS ulang (tombol my-location)
+  Future<void> _relocateOrigin() async {
+    setState(() => _isLocating = true);
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever ||
+          permission == LocationPermission.denied) {
+        _showSnackBar('Izin lokasi ditolak.');
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
+      );
+      final latLng = LatLng(pos.latitude, pos.longitude);
+      final label = await _reverseGeocode(latLng);
+
+      if (mounted) {
+        setState(() {
+          _originPoint = latLng;
+          _originLabel = label;
+          _originTextCtrl.text = label;
+          _step = 1;
+        });
+        _mapController.move(latLng, 15.0);
+      }
+    } catch (_) {
+      _showSnackBar('Gagal mendapatkan lokasi.');
+    } finally {
+      if (mounted) setState(() => _isLocating = false);
+    }
+  }
+
+  // ── Geocoding ─────────────────────────────────────────
+  Future<String> _reverseGeocode(LatLng point) async {
+    try {
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse'
+        '?lat=${point.latitude}&lon=${point.longitude}'
+        '&format=json&addressdetails=1',
+      );
+      final res = await http
+          .get(
+            uri,
+            headers: {
+              'User-Agent': 'MedanFlowApp/1.0',
+              'Accept-Language': 'id',
+            },
+          )
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final addr = data['address'] as Map<String, dynamic>?;
+        return (addr?['road'] as String?) ??
+            (addr?['suburb'] as String?) ??
+            (data['display_name'] as String? ?? 'Lokasi dipilih');
+      }
+    } catch (_) {}
+    return 'Lokasi dipilih';
+  }
+
+  Future<List<_PlaceSuggestion>> _searchPlaces(String query) async {
+    if (query.length < 3) return [];
+    try {
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/search'
+        '?q=${Uri.encodeComponent(query)}'
+        '&format=json&limit=5'
+        '&viewbox=98.4,3.3,98.9,3.8&bounded=0', // bias ke area Medan
+      );
+      final res = await http
+          .get(
+            uri,
+            headers: {
+              'User-Agent': 'MedanFlowApp/1.0',
+              'Accept-Language': 'id',
+            },
+          )
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        return list
+            .map((e) => _PlaceSuggestion.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  void _onOriginTextChanged(String val) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () async {
+      final results = await _searchPlaces(val);
+      if (mounted) {
+        setState(() {
+          _originSuggestions = results;
+          _showOriginSuggestions = results.isNotEmpty;
+        });
+      }
+    });
+  }
+
+  void _onDestTextChanged(String val) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () async {
+      final results = await _searchPlaces(val);
+      if (mounted) {
+        setState(() {
+          _destSuggestions = results;
+          _showDestSuggestions = results.isNotEmpty;
+        });
+      }
+    });
+  }
+
+  void _selectOriginSuggestion(_PlaceSuggestion s) {
+    final latLng = LatLng(s.lat, s.lon);
+    setState(() {
+      _originPoint = latLng;
+      _originLabel = s.shortName;
+      _originTextCtrl.text = s.shortName;
+      _showOriginSuggestions = false;
+      _step = 1;
+    });
+    _mapController.move(latLng, 15.0);
+    _originFocus.unfocus();
+  }
+
+  void _selectDestSuggestion(_PlaceSuggestion s) {
+    final latLng = LatLng(s.lat, s.lon);
+    setState(() {
+      _destPoint = latLng;
+      _destLabel = s.shortName;
+      _destTextCtrl.text = s.shortName;
+      _showDestSuggestions = false;
+    });
+    _mapController.move(latLng, 15.0);
+    _destFocus.unfocus();
+    // Langsung hitung kalau asal sudah ada
+    if (_originPoint != null) _calculateRoute();
   }
 
   // ── Business Logic ────────────────────────────────────
@@ -88,7 +335,6 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
           _step = 2;
         });
 
-        // Fit kamera ke tengah rute
         _mapController.move(
           LatLng(
             (_originPoint!.latitude + _destPoint!.latitude) / 2,
@@ -99,26 +345,29 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
       }
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Gagal menganalisis rute. Cek koneksi ke server.'),
-          backgroundColor: Color(0xFFDC2626),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showSnackBar('Gagal menganalisis rute. Cek koneksi ke server.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _confirmStep() {
+  /// Konfirmasi pin tengah peta (mode manual)
+  void _confirmMapPin() async {
     if (_step == 0) {
+      final label = await _reverseGeocode(_currentMapCenter);
       setState(() {
         _originPoint = _currentMapCenter;
+        _originLabel = label;
+        _originTextCtrl.text = label;
         _step = 1;
       });
     } else if (_step == 1) {
-      _destPoint = _currentMapCenter;
+      final label = await _reverseGeocode(_currentMapCenter);
+      setState(() {
+        _destPoint = _currentMapCenter;
+        _destLabel = label;
+        _destTextCtrl.text = label;
+      });
       _calculateRoute();
     }
   }
@@ -128,10 +377,27 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
       _step = 0;
       _originPoint = null;
       _destPoint = null;
+      _originLabel = '';
+      _destLabel = '';
+      _originTextCtrl.clear();
+      _destTextCtrl.clear();
       _predictionData = null;
       _routePoints = [];
+      _showOriginSuggestions = false;
+      _showDestSuggestions = false;
     });
     _mapController.move(_medanCenter, 15.0);
+  }
+
+  void _showSnackBar(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: const Color(0xFFDC2626),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   // ── Build ─────────────────────────────────────────────
@@ -144,13 +410,28 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
       body: Stack(
         children: [
           _buildMap(),
-          if (_step < 2) _buildCenterPin(),
-          if (_step < 2) _buildInfoCard(),
-          if (_step < 2) _buildActionButton(),
+          // Pin tengah peta hanya saat mode manual (belum ada titik yang di-set via teks)
+          if (_step < 2 && _shouldShowPin()) _buildCenterPin(),
+          // Search panel (selalu tampil saat step < 2)
+          if (_step < 2) _buildSearchPanel(),
+          // Tombol konfirmasi pin (hanya saat manual)
+          if (_step < 2 && _shouldShowPin()) _buildConfirmPinButton(),
+          // Hasil
           if (_step == 2 && _predictionData != null) _buildResultSheet(),
+          // Overlay loading
+          if (_isLoading) _buildLoadingOverlay(),
         ],
       ),
     );
+  }
+
+  /// Pin tengah ditampilkan jika:
+  /// - step 0: asal belum ditetapkan via teks
+  /// - step 1: tujuan belum ditetapkan via teks
+  bool _shouldShowPin() {
+    if (_step == 0) return _originPoint == null;
+    if (_step == 1) return _destPoint == null;
+    return false;
   }
 
   // ── AppBar ────────────────────────────────────────────
@@ -165,9 +446,8 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
           child: const Icon(Icons.arrow_back_ios_new, size: 16, color: _P.b600),
         ),
       ),
-      title: _step < 2
-          ? null
-          : ShaderMask(
+      title: _step == 2
+          ? ShaderMask(
               shaderCallback: (b) => const LinearGradient(
                 colors: [_P.b600, Color(0xFF06B6D4)],
               ).createShader(b),
@@ -180,7 +460,8 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
                   letterSpacing: -0.3,
                 ),
               ),
-            ),
+            )
+          : null,
     );
   }
 
@@ -191,7 +472,6 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
       options: MapOptions(
         initialCenter: _medanCenter,
         initialZoom: 15.0,
-        // ⚡ FIX: Hapus setState — update variabel biasa saja
         onPositionChanged: (position, hasGesture) {
           if (hasGesture && _step < 2 && position.center != null) {
             _currentMapCenter = position.center!;
@@ -199,20 +479,16 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
         },
       ),
       children: [
-        // ⚡ FIX: Hapus @2x, hapus additionalOptions yg redundan,
-        //         tambah keepBuffer & zoom limits
         TileLayer(
           urlTemplate:
               'https://api.mapbox.com/styles/v1/mapbox/streets-v12'
               '/tiles/256/{z}/{x}/{y}?access_token=${ApiService.mapboxToken}',
           userAgentPackageName: 'com.medanflow.app',
-          keepBuffer: 4, // tile tetap di-cache saat scroll
+          keepBuffer: 4,
           maxNativeZoom: 18,
           minNativeZoom: 10,
           tileSize: 256,
         ),
-
-        // Polyline rute
         if (_step == 2 && _routePoints.isNotEmpty)
           PolylineLayer(
             polylines: [
@@ -225,8 +501,6 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
               ),
             ],
           ),
-
-        // Marker asal & tujuan
         MarkerLayer(
           markers: [
             if (_originPoint != null)
@@ -235,7 +509,7 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
                 color: _P.b600,
                 icon: Icons.my_location_rounded,
               ),
-            if (_destPoint != null && _step == 2)
+            if (_destPoint != null && _step >= 1)
               _buildMarker(
                 point: _destPoint!,
                 color: const Color(0xFFDC2626),
@@ -306,23 +580,17 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
               ),
             ),
             const SizedBox(height: 6),
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: (isOrigin ? _P.b600 : const Color(0xFFEA580C))
-                        .withOpacity(0.40),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Icon(
-                Icons.location_on_rounded,
-                color: isOrigin ? _P.b500 : const Color(0xFFEA580C),
-                size: 52,
-              ),
+            Icon(
+              Icons.location_on_rounded,
+              color: isOrigin ? _P.b500 : const Color(0xFFEA580C),
+              size: 52,
+              shadows: [
+                Shadow(
+                  color: (isOrigin ? _P.b600 : const Color(0xFFEA580C))
+                      .withOpacity(0.40),
+                  blurRadius: 16,
+                ),
+              ],
             ),
           ],
         ),
@@ -330,99 +598,268 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
     );
   }
 
-  // ── Info Card (atas peta) ─────────────────────────────
-  Widget _buildInfoCard() {
-    final isOrigin = _step == 0;
+  // ── Search Panel ──────────────────────────────────────
+  Widget _buildSearchPanel() {
     return Positioned(
-      top: 100,
-      left: 20,
-      right: 20,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: _P.card,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _P.b100, width: 1.5),
-          boxShadow: [
-            BoxShadow(
-              color: _P.b500.withOpacity(0.10),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
+      top: 90,
+      left: 16,
+      right: 16,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Card input
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _P.card,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _P.b100, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: _P.b500.withOpacity(0.12),
+                  blurRadius: 18,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-          ],
+            child: Column(
+              children: [
+                // ── Asal ──────────────────────────────
+                _buildSearchField(
+                  controller: _originTextCtrl,
+                  focusNode: _originFocus,
+                  hint: 'Lokasi asal…',
+                  icon: Icons.my_location_rounded,
+                  iconColor: _P.b600,
+                  onChanged: _onOriginTextChanged,
+                  trailing: _isLocating
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _P.b500,
+                          ),
+                        )
+                      : IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 32,
+                          ),
+                          icon: const Icon(
+                            Icons.gps_fixed_rounded,
+                            size: 18,
+                            color: _P.b500,
+                          ),
+                          tooltip: 'Gunakan lokasi saat ini',
+                          onPressed: _relocateOrigin,
+                        ),
+                ),
+
+                // Divider dengan icon panah
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Divider(color: _P.b100, thickness: 1),
+                      ),
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 10),
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: _P.b50,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: _P.b100),
+                        ),
+                        child: const Icon(
+                          Icons.swap_vert_rounded,
+                          size: 14,
+                          color: _P.b600,
+                        ),
+                      ),
+                      const Expanded(
+                        child: Divider(color: _P.b100, thickness: 1),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ── Tujuan ────────────────────────────
+                _buildSearchField(
+                  controller: _destTextCtrl,
+                  focusNode: _destFocus,
+                  hint: 'Cari tujuan perjalanan…',
+                  icon: Icons.flag_rounded,
+                  iconColor: const Color(0xFFDC2626),
+                  onChanged: _onDestTextChanged,
+                ),
+              ],
+            ),
+          ),
+
+          // ── Suggestions asal ──────────────────────
+          if (_showOriginSuggestions && _originSuggestions.isNotEmpty)
+            _buildSuggestionList(
+              suggestions: _originSuggestions,
+              onSelect: _selectOriginSuggestion,
+            ),
+
+          // ── Suggestions tujuan ────────────────────
+          if (_showDestSuggestions && _destSuggestions.isNotEmpty)
+            _buildSuggestionList(
+              suggestions: _destSuggestions,
+              onSelect: _selectDestSuggestion,
+            ),
+
+          // ── Petunjuk geser peta ───────────────────
+          if (_step == 1 && _destPoint == null)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _P.ink.withOpacity(0.78),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.touch_app_rounded,
+                      size: 14,
+                      color: Colors.white70,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Geser peta untuk pin manual atau ketik lokasi tujuan',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchField({
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    required String hint,
+    required IconData icon,
+    required Color iconColor,
+    required ValueChanged<String> onChanged,
+    Widget? trailing,
+  }) {
+    return Row(
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: iconColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: iconColor, size: 17),
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: isOrigin
-                      ? [_P.b50, _P.b100]
-                      : [const Color(0xFFFFF7ED), const Color(0xFFFED7AA)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(
-                isOrigin ? Icons.my_location_rounded : Icons.flag_rounded,
-                color: isOrigin ? _P.b600 : const Color(0xFFEA580C),
-                size: 20,
-              ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            onChanged: onChanged,
+            style: const TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: _P.ink,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isOrigin
-                        ? 'Tentukan Lokasi Asal'
-                        : 'Tentukan Lokasi Tujuan',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                      color: _P.ink,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Geser peta untuk memposisikan pin',
-                    style: TextStyle(
-                      color: _P.ink3,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: const TextStyle(
+                color: _P.ink3,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
               ),
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: _P.b50,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _P.b100, width: 1),
+          ),
+        ),
+        if (trailing != null) trailing,
+      ],
+    );
+  }
+
+  Widget _buildSuggestionList({
+    required List<_PlaceSuggestion> suggestions,
+    required ValueChanged<_PlaceSuggestion> onSelect,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      decoration: BoxDecoration(
+        color: _P.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _P.b100, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: _P.b500.withOpacity(0.10),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: suggestions.length,
+          separatorBuilder: (_, __) => const Divider(height: 1, color: _P.b50),
+          itemBuilder: (_, i) {
+            final s = suggestions[i];
+            return ListTile(
+              dense: true,
+              leading: const Icon(
+                Icons.place_outlined,
+                size: 18,
+                color: _P.b500,
               ),
-              child: Text(
-                '${_step + 1}/2',
+              title: Text(
+                s.shortName,
                 style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: _P.b600,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: _P.ink,
                 ),
               ),
-            ),
-          ],
+              subtitle: Text(
+                s.displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10.5, color: _P.ink3),
+              ),
+              onTap: () => onSelect(s),
+            );
+          },
         ),
       ),
     );
   }
 
-  // ── Action Button ─────────────────────────────────────
-  Widget _buildActionButton() {
+  // ── Confirm Pin Button ────────────────────────────────
+  Widget _buildConfirmPinButton() {
     return Positioned(
       bottom: 40,
       left: 24,
@@ -438,7 +875,7 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
             ),
             padding: EdgeInsets.zero,
           ),
-          onPressed: _isLoading ? null : _confirmStep,
+          onPressed: _isLoading ? null : _confirmMapPin,
           child: Ink(
             decoration: BoxDecoration(
               gradient: const LinearGradient(
@@ -456,26 +893,45 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
               ],
             ),
             child: Center(
-              child: _isLoading
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2.5,
-                      ),
-                    )
-                  : Text(
-                      _step == 0
-                          ? 'KONFIRMASI ASAL'
-                          : 'ANALISIS ESTIMASI WAKTU',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
+              child: Text(
+                _step == 0
+                    ? 'KONFIRMASI LOKASI ASAL'
+                    : 'KONFIRMASI LOKASI TUJUAN',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Loading Overlay ───────────────────────────────────
+  Widget _buildLoadingOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.25),
+      child: const Center(
+        child: Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(20)),
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: _P.b500),
+                SizedBox(height: 14),
+                Text(
+                  'Menganalisis rute…',
+                  style: TextStyle(fontWeight: FontWeight.w700, color: _P.ink),
+                ),
+              ],
             ),
           ),
         ),
@@ -505,7 +961,6 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Drag handle
             Padding(
               padding: const EdgeInsets.only(top: 14),
               child: Container(
@@ -518,9 +973,61 @@ class _TravelTimePredictionScreenState extends State<TravelTimePredictionScreen>
               ),
             ),
 
-            // Header gradient banner
+            // Lokasi ringkas
+            if (_originLabel.isNotEmpty || _destLabel.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.my_location_rounded,
+                      size: 13,
+                      color: _P.b600,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        _originLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: _P.ink3,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 12,
+                      color: _P.ink3,
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.flag_rounded,
+                      size: 13,
+                      color: Color(0xFFDC2626),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        _destLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: _P.ink3,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Header gradient
             Container(
-              margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
