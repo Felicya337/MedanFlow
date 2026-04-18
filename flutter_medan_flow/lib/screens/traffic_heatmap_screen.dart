@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart'; // ← TAMBAHAN
 import '../services/api_service.dart';
 
 // ─────────────────────────────────────────────
@@ -39,9 +40,37 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
   List<CircleMarker> _circles = [];
   bool _isLoading = false;
 
+  Position? _userPosition; // ← TAMBAHAN
+
   @override
   void initState() {
     super.initState();
+    _determinePosition(); // ← GANTI: dulu langsung _fetchHeatmapData()
+  }
+
+  // ── TAMBAHAN: Ambil GPS dulu, baru fetch data ────────────────
+  Future<void> _determinePosition() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse) {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      setState(() {
+        _userPosition = position;
+        // Peta otomatis pindah ke lokasi GPS asli pengguna
+        _mapController.move(
+          LatLng(position.latitude, position.longitude),
+          14,
+        );
+      });
+    }
+
+    // Tetap fetch data meski GPS ditolak
     _fetchHeatmapData();
   }
 
@@ -49,11 +78,14 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
   Future<void> _fetchHeatmapData() async {
     setState(() => _isLoading = true);
     try {
-      final response = await http.get(
-        Uri.parse(
-          "${ApiService().baseUrl}/traffic-heatmap?minutes=${_predictionMinutes.toInt()}",
-        ),
-      );
+      // ← MODIFIKASI: tambahkan lat & lng jika GPS tersedia
+      String url =
+          "${ApiService().baseUrl}/traffic-heatmap?minutes=${_predictionMinutes.toInt()}";
+      if (_userPosition != null) {
+        url += "&lat=${_userPosition!.latitude}&lng=${_userPosition!.longitude}";
+      }
+
+      final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
         final List data = jsonDecode(response.body)['data'];
         _generateCircles(data);
@@ -93,14 +125,14 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
   }
 
   void _zoomIn() => _mapController.move(
-    _mapController.camera.center,
-    _mapController.camera.zoom + 1,
-  );
+        _mapController.camera.center,
+        _mapController.camera.zoom + 1,
+      );
 
   void _zoomOut() => _mapController.move(
-    _mapController.camera.center,
-    _mapController.camera.zoom - 1,
-  );
+        _mapController.camera.center,
+        _mapController.camera.zoom - 1,
+      );
 
   // ════════════════════════════════════════════════════════════
   //  BUILD
@@ -113,7 +145,7 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // ── 1. Peta (MENGGUNAKAN MAPBOX TRAFFIC API) ────────
+          // ── 1. Peta ─────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: const MapOptions(
@@ -121,9 +153,9 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
               initialZoom: 13,
             ),
             children: [
-              // INTEGRASI MAPBOX LAYER
               TileLayer(
-                urlTemplate: 'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
+                urlTemplate:
+                    'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
                 additionalOptions: const {
                   'accessToken': ApiService.mapboxToken,
                   'id': ApiService.mapboxTrafficStyle,
@@ -131,10 +163,42 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
                 userAgentPackageName: 'com.medanflow.app',
               ),
               CircleLayer(circles: _circles),
+
+              // ← TAMBAHAN: Marker lokasi pengguna
+              if (_userPosition != null)
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: LatLng(
+                        _userPosition!.latitude,
+                        _userPosition!.longitude,
+                      ),
+                      width: 44,
+                      height: 44,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _P.b600,
+                          boxShadow: [
+                            BoxShadow(
+                              color: _P.b600.withOpacity(0.4),
+                              blurRadius: 10,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.my_location_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
             ],
           ),
 
-          // ── 2. Header ──────────────────────────────────────
+          // ── 2. Header ────────────────────────────────────────
           Positioned(
             top: topPad + 12,
             left: 20,
@@ -142,17 +206,17 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
             child: _buildHeader(),
           ),
 
-          // ── 3. Legend ──────────────────────────────────────
+          // ── 3. Legend ────────────────────────────────────────
           Positioned(top: topPad + 80, left: 20, child: _buildLegend()),
 
-          // ── 4. Zoom Controls ───────────────────────────────
+          // ── 4. Zoom Controls ──────────────────────────────────
           Positioned(
             right: 20,
             top: MediaQuery.of(context).size.height * 0.38,
             child: _buildZoomControls(),
           ),
 
-          // ── 5. Prediction Panel ────────────────────────────
+          // ── 5. Prediction Panel ───────────────────────────────
           Positioned(
             bottom: 30,
             left: 20,
@@ -160,7 +224,7 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
             child: _buildPredictionPanel(),
           ),
 
-          // ── 6. Loading Indicator ───────────────────────────
+          // ── 6. Loading Indicator ──────────────────────────────
           if (_isLoading)
             Positioned(
               top: topPad + 80,
@@ -173,7 +237,8 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
     );
   }
 
-  // ── Header ───────────────────────────────────────────────────
+  // Semua widget builder di bawah ini tidak ada perubahan ──────
+
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
@@ -270,7 +335,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
     );
   }
 
-  // ── Legend ───────────────────────────────────────────────────
   Widget _buildLegend() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
@@ -337,7 +401,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
     );
   }
 
-  // ── Zoom Controls ─────────────────────────────────────────────
   Widget _buildZoomControls() {
     return Column(
       children: [
@@ -371,7 +434,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
     );
   }
 
-  // ── Loading Chip ──────────────────────────────────────────────
   Widget _buildLoadingChip() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
@@ -415,7 +477,6 @@ class _TrafficHeatmapScreenState extends State<TrafficHeatmapScreen> {
     );
   }
 
-  // ── Prediction Panel ──────────────────────────────────────────
   Widget _buildPredictionPanel() {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),

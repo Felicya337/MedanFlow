@@ -38,23 +38,53 @@ class RouteRecommendationScreen extends StatefulWidget {
 
 class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
   final ApiService _apiService = ApiService();
-
-  // Gunakan Completer agar move() hanya dipanggil setelah map siap
-  final Completer<MapController> _mapControllerCompleter = Completer();
-  MapController? _mapController;
-
+  final MapController _mapController = MapController();
   List _recommendations = [];
   bool _isLoading = false;
 
   final TextEditingController _originController = TextEditingController(
-    text: 'Mendeteksi lokasi...',
+    text: "Mendeteksi lokasi...",
   );
-  final TextEditingController _destController = TextEditingController(
-    text: 'Pinang Baris',
-  );
+  final TextEditingController _destController = TextEditingController();
+  final FocusNode _destFocusNode = FocusNode();
 
-  // Posisi default Medan langsung di sini, tidak perlu tunggu GPS
-  static const LatLng _defaultCenter = LatLng(3.5952, 98.6722);
+  // Daftar tujuan populer Medan
+  final List<String> _popularDestinations = [
+    "Pinang Baris",
+    "Amplas",
+    "Lapangan Merdeka",
+    "Carrefour Multatuli",
+    "Sunggal",
+    "Helvetia",
+    "Padang Bulan",
+    "Kampung Lalang",
+    "Marelan",
+    "Belawan",
+    "Binjai",
+    "Polonia",
+    "Aksara",
+    "Pancing",
+    "Pasar Petisah",
+    "Tembung",
+    "Delitua",
+    "Sei Sikambing",
+    "Pusat Pasar Medan",
+    "Petisah",
+    "Medan Kota",
+    "Medan Baru",
+    "Medan Selayang",
+    "Medan Deli",
+    "Medan Belawan",
+    "Ringroad",
+    "Gatot Subroto",
+    "Iskandar Muda",
+    "Nibung Raya",
+    "Brigjen Katamso",
+  ];
+
+  List<String> _filteredSuggestions = [];
+  bool _showSuggestions = false;
+
   Position? _userPosition;
   List<LatLng> _currentPolyline = [];
   int? _selectedRouteIndex;
@@ -62,76 +92,114 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
   @override
   void initState() {
     super.initState();
-    _setDefaultPosition();
+    _determinePosition();
+    _destFocusNode.addListener(() {
+      if (!_destFocusNode.hasFocus) {
+        setState(() => _showSuggestions = false);
+      }
+    });
   }
 
-  // Set posisi Medan secara synchronous supaya marker langsung muncul
-  void _setDefaultPosition() {
-    final position = Position(
-      latitude: _defaultCenter.latitude,
-      longitude: _defaultCenter.longitude,
-      timestamp: DateTime.now(),
-      accuracy: 1,
-      altitude: 1,
-      heading: 1,
-      speed: 1,
-      speedAccuracy: 1,
-      altitudeAccuracy: 1,
-      headingAccuracy: 1,
-    );
-    _userPosition = position;
-    _originController.text = 'Lokasi Saya (Medan)';
+  @override
+  void dispose() {
+    _originController.dispose();
+    _destController.dispose();
+    _destFocusNode.dispose();
+    super.dispose();
   }
 
-  // Dipanggil setelah map siap (dari tombol my_location)
   Future<void> _determinePosition() async {
-    setState(() => _originController.text = 'Mendeteksi GPS...');
+    setState(() => _originController.text = "Mendeteksi GPS...");
 
-    try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
 
-      if (permission == LocationPermission.always ||
-          permission == LocationPermission.whileInUse) {
-        final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
+    if (permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse) {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        _userPosition = position;
+        _originController.text = "Lokasi Saya Saat Ini";
+        _mapController.move(
+          LatLng(position.latitude, position.longitude),
+          14,
         );
-
-        if (!mounted) return;
-        setState(() {
-          _userPosition = position;
-          _originController.text = 'Lokasi Saya Saat Ini';
-        });
-
-        // Safe move via completer
-        final ctrl = await _mapControllerCompleter.future;
-        ctrl.move(LatLng(position.latitude, position.longitude), 14);
-      } else {
-        if (mounted)
-          setState(() => _originController.text = 'Izin GPS Ditolak');
-      }
-    } catch (e) {
-      debugPrint('GPS error: $e');
-      if (mounted)
-        setState(() => _originController.text = 'Lokasi Saya (Medan)');
+      });
+    } else {
+      setState(() => _originController.text = "Izin GPS Ditolak");
     }
   }
 
+  void _onDestChanged(String value) {
+    if (value.trim().isEmpty) {
+      setState(() {
+        _filteredSuggestions = [];
+        _showSuggestions = false;
+      });
+      return;
+    }
+    final filtered = _popularDestinations
+        .where((d) => d.toLowerCase().contains(value.toLowerCase()))
+        .take(6)
+        .toList();
+    setState(() {
+      _filteredSuggestions = filtered;
+      _showSuggestions = filtered.isNotEmpty;
+    });
+  }
+
+  void _selectDestination(String place) {
+    _destController.text = place;
+    _destFocusNode.unfocus();
+    setState(() {
+      _showSuggestions = false;
+      _filteredSuggestions = [];
+    });
+  }
+
+  void _clearDest() {
+    _destController.clear();
+    setState(() {
+      _showSuggestions = false;
+      _filteredSuggestions = [];
+    });
+    _destFocusNode.requestFocus();
+  }
+
   Future<void> _fetchSmartRoutes() async {
+    final dest = _destController.text.trim();
+    if (dest.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text("Masukkan tujuan terlebih dahulu."),
+          backgroundColor: _P.b600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _currentPolyline = [];
       _selectedRouteIndex = null;
     });
+
     try {
-      String url = '${_apiService.baseUrl}/recommendations';
+      String url = "${ApiService().baseUrl}/recommendations";
+      final queryParams = <String, String>{'dest': dest};
       if (_userPosition != null) {
-        url +=
-            '?lat=${_userPosition!.latitude}&lng=${_userPosition!.longitude}';
+        queryParams['lat'] = _userPosition!.latitude.toString();
+        queryParams['lng'] = _userPosition!.longitude.toString();
       }
-      final response = await http.get(Uri.parse(url));
+      final uri = Uri.parse(url).replace(queryParameters: queryParams);
+      final response = await http.get(uri);
       if (response.statusCode == 200) {
         final List data = jsonDecode(response.body);
         setState(() {
@@ -144,7 +212,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Error: $e');
+      debugPrint("Error: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -152,29 +220,21 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
 
   void _drawRoute(dynamic geometry, {int? index}) {
     if (geometry == null || geometry is! List || geometry.isEmpty) return;
-    final List<LatLng> points = [
-      for (var coord in geometry)
+    List<LatLng> points = [];
+    for (var coord in geometry) {
+      points.add(
         LatLng((coord[1] as num).toDouble(), (coord[0] as num).toDouble()),
-    ];
+      );
+    }
     setState(() {
       _currentPolyline = points;
       if (index != null) _selectedRouteIndex = index;
     });
-    if (points.isNotEmpty && _mapController != null) {
-      _mapController!.move(points[points.length ~/ 2], 13.0);
+    if (points.isNotEmpty) {
+      _mapController.move(points[points.length ~/ 2], 13.0);
     }
   }
 
-  // Safe move helper
-  void _safeMove(LatLng center, double zoom) {
-    if (_mapControllerCompleter.isCompleted && _mapController != null) {
-      _mapController!.move(center, zoom);
-    }
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // BUILD UTAMA
-  // ══════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -192,11 +252,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
               border: Border.all(color: _P.b100, width: 1.5),
             ),
             child: IconButton(
-              icon: const Icon(
-                Icons.arrow_back_ios_new,
-                size: 16,
-                color: _P.b600,
-              ),
+              icon: const Icon(Icons.arrow_back_ios_new, size: 16, color: _P.b600),
               onPressed: () => Navigator.pop(context),
             ),
           ),
@@ -211,183 +267,275 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
         ),
         centerTitle: true,
       ),
-      body: Stack(
-        children: [
-          // ── Peta ──────────────────────────────────────────────────────────
-          FlutterMap(
-            options: MapOptions(
-              initialCenter: _defaultCenter,
-              initialZoom: 14,
-              onMapReady: () {
-                if (!_mapControllerCompleter.isCompleted) {
-                  _mapControllerCompleter.complete(_mapController);
-                }
-              },
-            ),
-            children: [
-              TileLayer(
-                // Tanpa @2x agar tile lebih kecil & cepat dimuat
-                urlTemplate:
-                    'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}?access_token=${ApiService.mapboxToken}',
-                userAgentPackageName: 'com.medanflow.app',
-                maxNativeZoom: 18,
-                keepBuffer: 4,
+      body: GestureDetector(
+        onTap: () {
+          FocusScope.of(context).unfocus();
+          setState(() => _showSuggestions = false);
+        },
+        child: Stack(
+          children: [
+            FlutterMap(
+              mapController: _mapController,
+              options: const MapOptions(
+                initialCenter: LatLng(3.5952, 98.6722),
+                initialZoom: 13,
               ),
-              PolylineLayer(
-                polylines: [
-                  if (_currentPolyline.isNotEmpty)
+              children: [
+                TileLayer(
+                  urlTemplate:
+                      'https://api.mapbox.com/styles/v1/${ApiService.mapboxTrafficStyle}/tiles/256/{z}/{x}/{y}@2x?access_token=${ApiService.mapboxToken}',
+                  userAgentPackageName: 'com.medanflow.app',
+                ),
+                PolylineLayer(
+                  polylines: [
                     Polyline(
                       points: _currentPolyline,
-                      color: _P.b500,
+                      color: _P.b600,
                       strokeWidth: 5.5,
                       strokeCap: StrokeCap.round,
                       strokeJoin: StrokeJoin.round,
                     ),
-                ],
-              ),
-              if (_userPosition != null)
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: LatLng(
-                        _userPosition!.latitude,
-                        _userPosition!.longitude,
+                  ],
+                ),
+                if (_userPosition != null)
+                  MarkerLayer(
+                    markers: [
+                      Marker(
+                        point: LatLng(
+                          _userPosition!.latitude,
+                          _userPosition!.longitude,
+                        ),
+                        width: 44,
+                        height: 44,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _P.b600,
+                            boxShadow: [
+                              BoxShadow(
+                                color: _P.b600.withOpacity(0.4),
+                                blurRadius: 10,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            Icons.my_location_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
                       ),
-                      width: 44,
-                      height: 44,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _P.b600,
-                          boxShadow: [
-                            BoxShadow(
-                              color: _P.b600.withOpacity(0.4),
-                              blurRadius: 10,
-                            ),
-                          ],
+                    ],
+                  ),
+              ],
+            ),
+
+            // Search Card
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 66,
+              left: 20,
+              right: 20,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _P.card,
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _P.b500.withOpacity(0.1),
+                      blurRadius: 16,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Input asal (read-only, dari GPS)
+                    _buildSearchInput(
+                      Icons.my_location_rounded,
+                      "Asal",
+                      _originController,
+                      _P.b600,
+                    ),
+                    const Divider(height: 24),
+
+                    // Input tujuan (editable + suggestions)
+                    _buildEditableDestInput(),
+
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _fetchSmartRoutes,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _P.b600,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
-                        child: const Icon(
-                          Icons.my_location_rounded,
-                          color: Colors.white,
-                          size: 22,
-                        ),
+                        child: _isLoading
+                            ? const CircularProgressIndicator(
+                                color: Colors.white,
+                              )
+                            : const Text(
+                                "ANALISIS JALUR TERCEPAT",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
                       ),
                     ),
                   ],
                 ),
-            ],
-          ),
-
-          // ── Search Card ───────────────────────────────────────────────────
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 66,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: _P.card,
-                borderRadius: BorderRadius.circular(22),
-                boxShadow: [
-                  BoxShadow(color: _P.b500.withOpacity(0.1), blurRadius: 16),
-                ],
               ),
+            ),
+
+            // Zoom Controls
+            Positioned(
+              right: 16,
+              top: MediaQuery.of(context).size.height * 0.42,
               child: Column(
                 children: [
-                  _buildSearchInput(
-                    Icons.my_location_rounded,
-                    'Asal',
-                    _originController,
-                    _P.b600,
+                  _buildMapActionBtn(
+                    Icons.add_rounded,
+                    () => _mapController.move(
+                      _mapController.camera.center,
+                      _mapController.camera.zoom + 1,
+                    ),
                   ),
-                  const Divider(height: 24),
-                  _buildSearchInput(
-                    Icons.flag_rounded,
-                    'Tujuan',
-                    _destController,
-                    Colors.redAccent,
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _fetchSmartRoutes,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _P.b600,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text(
-                              'ANALISIS JALUR TERCEPAT',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
+                  const SizedBox(height: 8),
+                  _buildMapActionBtn(
+                    Icons.remove_rounded,
+                    () => _mapController.move(
+                      _mapController.camera.center,
+                      _mapController.camera.zoom - 1,
                     ),
                   ),
                 ],
               ),
             ),
-          ),
 
-          // ── Zoom Controls ─────────────────────────────────────────────────
-          Positioned(
-            right: 16,
-            top: MediaQuery.of(context).size.height * 0.42,
-            child: Column(
-              children: [
-                _buildMapActionBtn(
-                  Icons.add_rounded,
-                  () => _safeMove(
-                    _mapController?.camera.center ?? _defaultCenter,
-                    (_mapController?.camera.zoom ?? 14) + 1,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildMapActionBtn(
-                  Icons.remove_rounded,
-                  () => _safeMove(
-                    _mapController?.camera.center ?? _defaultCenter,
-                    (_mapController?.camera.zoom ?? 14) - 1,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildMapActionBtn(
-                  Icons.my_location_rounded,
-                  _determinePosition,
-                  accent: true,
-                ),
-              ],
-            ),
-          ),
-
-          // ── Draggable Results ─────────────────────────────────────────────
-          _buildDraggableResults(),
-        ],
+            _buildDraggableResults(),
+          ],
+        ),
       ),
     );
   }
 
-  // ── Widget Helpers ─────────────────────────────────────────────────────────
+  Widget _buildEditableDestInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.flag_rounded, size: 20, color: Colors.redAccent),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _destController,
+                focusNode: _destFocusNode,
+                onChanged: _onDestChanged,
+                onTap: () => _onDestChanged(_destController.text),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: _P.ink,
+                ),
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  hintText: "Ketik tujuan...",
+                  hintStyle: const TextStyle(
+                    color: _P.ink4,
+                    fontWeight: FontWeight.normal,
+                  ),
+                  suffixIcon: _destController.text.isNotEmpty
+                      ? GestureDetector(
+                          onTap: _clearDest,
+                          child: const Icon(
+                            Icons.close_rounded,
+                            size: 18,
+                            color: _P.ink4,
+                          ),
+                        )
+                      : null,
+                ),
+              ),
+            ),
+          ],
+        ),
 
-  Widget _buildMapActionBtn(
-    IconData icon,
-    VoidCallback onTap, {
-    bool accent = false,
-  }) {
+        // Suggestion list
+        if (_showSuggestions)
+          Container(
+            margin: const EdgeInsets.only(left: 32, top: 6),
+            decoration: BoxDecoration(
+              color: _P.card,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _P.b100),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: _filteredSuggestions.asMap().entries.map((entry) {
+                  final isLast = entry.key == _filteredSuggestions.length - 1;
+                  return InkWell(
+                    onTap: () => _selectDestination(entry.value),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        border: isLast
+                            ? null
+                            : const Border(
+                                bottom: BorderSide(color: _P.b100, width: 0.5),
+                              ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on_outlined,
+                            size: 15,
+                            color: _P.ink4,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            entry.value,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: _P.ink2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMapActionBtn(IconData icon, VoidCallback onTap) {
     return Container(
       decoration: BoxDecoration(
-        color: accent ? _P.b600 : _P.card,
+        color: _P.card,
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 5)],
       ),
       child: IconButton(
-        icon: Icon(icon, color: accent ? Colors.white : _P.b600),
+        icon: Icon(icon, color: _P.b600),
         onPressed: onTap,
       ),
     );
@@ -439,77 +587,42 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
           ),
           child: Column(
             children: [
-              // Handle bar
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: _P.b100,
-                    borderRadius: BorderRadius.circular(10),
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: _P.b100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  'OPSI RUTE TERBAIK',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: _P.ink2,
                   ),
                 ),
               ),
-              // Header
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'OPSI RUTE TERBAIK',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: _P.ink2,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    if (_recommendations.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _P.b50,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: _P.b100),
-                        ),
-                        child: Text(
-                          '${_recommendations.length} Rute',
-                          style: const TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            color: _P.b600,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Container(height: 1, color: _P.b50),
-              // Content
               Expanded(
                 child: _recommendations.isEmpty
                     ? SingleChildScrollView(
                         controller: scrollController,
-                        child: const Center(
+                        child: Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              SizedBox(height: 10),
+                              const SizedBox(height: 10),
                               Icon(
                                 Icons.alt_route_rounded,
                                 color: _P.b300,
                                 size: 40,
                               ),
-                              SizedBox(height: 8),
-                              Text(
+                              const SizedBox(height: 8),
+                              const Text(
                                 'Cari rute di atas',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
@@ -517,7 +630,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                                   fontSize: 13,
                                 ),
                               ),
-                              SizedBox(height: 20),
+                              const SizedBox(height: 20),
                             ],
                           ),
                         ),
@@ -553,64 +666,28 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
           color: isSelected ? _P.b50 : _P.card,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: isSelected ? _P.b400 : _P.b100),
-          boxShadow: [
-            BoxShadow(
-              color: _P.b500.withOpacity(isSelected ? 0.12 : 0.05),
-              blurRadius: isSelected ? 14 : 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
         ),
         child: Row(
           children: [
-            // ETA badge
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                gradient: isSelected
-                    ? const LinearGradient(
-                        colors: [_P.b500, _P.b700],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : const LinearGradient(
-                        colors: [_P.b50, _P.b100],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: isSelected
-                    ? [
-                        BoxShadow(
-                          color: _P.b600.withOpacity(0.30),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                        ),
-                      ]
-                    : [],
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    item['eta']?.split(' ')[0] ?? '0',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                      color: isSelected ? Colors.white : _P.b600,
-                    ),
+            Column(
+              children: [
+                Text(
+                  item['eta']?.split(" ")[0] ?? "0",
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                    color: _P.b600,
                   ),
-                  Text(
-                    'MENIT',
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                      color: isSelected
-                          ? Colors.white.withOpacity(0.75)
-                          : _P.ink4,
-                    ),
+                ),
+                const Text(
+                  'MENIT',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: _P.ink4,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
             const SizedBox(width: 20),
             Expanded(
@@ -618,24 +695,20 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    item['name'] ?? 'Rute Medan',
+                    item['name'] ?? "Rute Medan",
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
                     ),
                   ),
                   Text(
-                    item['distance']?.toString() ?? '-',
+                    item['distance']?.toString() ?? "-",
                     style: const TextStyle(fontSize: 12, color: _P.ink3),
                   ),
                 ],
               ),
             ),
-            Icon(
-              Icons.directions_rounded,
-              color: isSelected ? _P.b600 : _P.b400,
-              size: 24,
-            ),
+            const Icon(Icons.directions_rounded, color: _P.b400, size: 24),
           ],
         ),
       ),
