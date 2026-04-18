@@ -79,43 +79,43 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
       altitudeAccuracy: 1,
       headingAccuracy: 1,
     );
-    // Set state sebelum build → marker langsung ada saat peta muncul
     _userPosition = position;
     _originController.text = 'Lokasi Saya (Medan)';
   }
 
-  // Dipanggil setelah map siap (dari tombol my_location atau onMapReady)
+  // Dipanggil setelah map siap (dari tombol my_location)
   Future<void> _determinePosition() async {
+    setState(() => _originController.text = 'Mendeteksi GPS...');
+
     try {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
-        await Geolocator.requestPermission();
+        permission = await Geolocator.requestPermission();
       }
-      // Cheat Emulator (Medan) – ganti dengan GPS asli jika perlu
-      final position = Position(
-        latitude: _defaultCenter.latitude,
-        longitude: _defaultCenter.longitude,
-        timestamp: DateTime.now(),
-        accuracy: 1,
-        altitude: 1,
-        heading: 1,
-        speed: 1,
-        speedAccuracy: 1,
-        altitudeAccuracy: 1,
-        headingAccuracy: 1,
-      );
 
-      if (!mounted) return;
-      setState(() {
-        _userPosition = position;
-        _originController.text = 'Lokasi Saya (Medan)';
-      });
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
 
-      // Safe move via completer
-      final ctrl = await _mapControllerCompleter.future;
-      ctrl.move(LatLng(position.latitude, position.longitude), 14);
+        if (!mounted) return;
+        setState(() {
+          _userPosition = position;
+          _originController.text = 'Lokasi Saya Saat Ini';
+        });
+
+        // Safe move via completer
+        final ctrl = await _mapControllerCompleter.future;
+        ctrl.move(LatLng(position.latitude, position.longitude), 14);
+      } else {
+        if (mounted)
+          setState(() => _originController.text = 'Izin GPS Ditolak');
+      }
     } catch (e) {
       debugPrint('GPS error: $e');
+      if (mounted)
+        setState(() => _originController.text = 'Lokasi Saya (Medan)');
     }
   }
 
@@ -498,18 +498,18 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                 child: _recommendations.isEmpty
                     ? SingleChildScrollView(
                         controller: scrollController,
-                        child: Center(
+                        child: const Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const SizedBox(height: 10),
+                              SizedBox(height: 10),
                               Icon(
                                 Icons.alt_route_rounded,
                                 color: _P.b300,
                                 size: 40,
                               ),
-                              const SizedBox(height: 8),
-                              const Text(
+                              SizedBox(height: 8),
+                              Text(
                                 'Cari rute di atas',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
@@ -517,7 +517,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                                   fontSize: 13,
                                 ),
                               ),
-                              const SizedBox(height: 20),
+                              SizedBox(height: 20),
                             ],
                           ),
                         ),
@@ -573,7 +573,7 @@ class _RouteRecommendationScreenState extends State<RouteRecommendationScreen> {
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       )
-                    : LinearGradient(
+                    : const LinearGradient(
                         colors: [_P.b50, _P.b100],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,

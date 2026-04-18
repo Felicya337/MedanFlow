@@ -2,11 +2,11 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart'; // Wajib untuk ambil token
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 
 // ─────────────────────────────────────────────
-// Palette (same as all other screens)
+// Palette (Mewah & Profesional Medan Flow)
 // ─────────────────────────────────────────────
 class _P {
   static const b50 = Color(0xFFEFF6FF);
@@ -36,11 +36,9 @@ class AdminAnalyticsScreen extends StatefulWidget {
 
 class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
     with SingleTickerProviderStateMixin {
-  // ── Data ─────────────────────────────────────────
+  
   bool _isLoading = true;
   List<dynamic> _chartData = [];
-
-  // ── Animation ────────────────────────────────────────────────
   late AnimationController _orbCtrl;
 
   @override
@@ -59,7 +57,7 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
     super.dispose();
   }
 
-  // ── Logic (FIXED: Added Token & Error Handling) ────────────────────────
+  // ── Logic Pengambilan Data ──────────────────────────────────────────
   Future<void> _fetchAnalytics() async {
     setState(() => _isLoading = true);
     try {
@@ -69,25 +67,25 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
       final response = await http.get(
         Uri.parse('${ApiService().baseUrl}/admin/stats'),
         headers: {
-          'Authorization': 'Bearer $token', // Kirim token agar tidak 401
+          'Authorization': 'Bearer $token',
           'Accept': 'application/json',
         },
       );
 
+      debugPrint("API Response Status: ${response.statusCode}");
+      
       if (response.statusCode == 200) {
         final decodedData = jsonDecode(response.body);
         setState(() {
           _chartData = decodedData['chart_data'] ?? [];
         });
       } else {
-        debugPrint('Server Error: ${response.statusCode}');
-        _showErrorSnackBar("Gagal mengambil data dari server");
+        _showErrorSnackBar("Gagal memuat data (Error: ${response.statusCode})");
       }
     } catch (e) {
-      debugPrint('Analytics Error: $e');
-      _showErrorSnackBar("Koneksi bermasalah: Pastikan server jalan");
+      debugPrint('Analytics Catch Error: $e');
+      _showErrorSnackBar("Masalah koneksi ke server.");
     } finally {
-      // Memastikan spinner berhenti meski terjadi error
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -95,23 +93,30 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
         backgroundColor: Colors.redAccent,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       ),
     );
   }
 
-  // ════════════════════════════════════════════════════════════
-  //  BUILD
-  // ════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  // BUILD UTAMA
+  // ══════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _P.bg,
       body: Stack(
         children: [
-          _buildOrbBg(),
+          _buildOrbBg(), 
           SafeArea(
             bottom: false,
             child: Column(
@@ -126,7 +131,7 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
     );
   }
 
-  // ── Orb Background ───────────────────────────────────────────
+  // ── Orb Background (Dekorasi Melayang) ─────────────────────────────────
   Widget _buildOrbBg() {
     return Positioned.fill(
       child: IgnorePointer(
@@ -137,19 +142,19 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
             return Stack(
               children: [
                 Positioned(
-                  top: -80 + t * 38,
-                  left: -60 + t * 28,
-                  child: _orb(300, _P.b400, 0.16),
+                  top: -100 + t * 40,
+                  left: -80 + t * 30,
+                  child: _orb(350, _P.b400, 0.12),
                 ),
                 Positioned(
-                  top: 180 + t * 28,
-                  right: -70 - t * 18,
-                  child: _orb(220, const Color(0xFF06B6D4), 0.14),
+                  top: 250 + t * 40,
+                  right: -90 - t * 20,
+                  child: _orb(280, const Color(0xFF06B6D4), 0.10),
                 ),
                 Positioned(
-                  bottom: 280 - t * 22,
-                  left: 20 + t * 18,
-                  child: _orb(180, _P.b300, 0.13),
+                  bottom: 200 - t * 30,
+                  left: 40 + t * 25,
+                  child: _orb(200, _P.b300, 0.08),
                 ),
               ],
             );
@@ -170,42 +175,38 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
     ),
   );
 
-  // ── Header ───────────────────────────────────────────────────
+  // ── Header (Glossy Style) ───────────────────────────────────────────
   Widget _buildHeader() {
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [_P.b600, _P.b800, _P.dark],
-          stops: [0.0, 0.55, 1.0],
+          stops: [0.0, 0.5, 1.0],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: _P.b600.withOpacity(0.30),
-            blurRadius: 24,
-            offset: const Offset(0, 6),
+            color: _P.b600.withOpacity(0.35),
+            blurRadius: 25,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Stack(
         children: [
-          // Radial gloss
           Positioned.fill(
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(24),
               child: Container(
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
-                    center: const Alignment(0.85, -0.75),
-                    radius: 1.1,
-                    colors: [
-                      Colors.white.withOpacity(0.08),
-                      Colors.transparent,
-                    ],
+                    center: const Alignment(0.9, -0.8),
+                    radius: 1.2,
+                    colors: [Colors.white.withOpacity(0.12), Colors.transparent],
                   ),
                 ),
               ),
@@ -213,54 +214,50 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
           ),
           Row(
             children: [
-              // Back button
-              GestureDetector(
-                onTap: () => Navigator.maybePop(context),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.arrow_back_ios_new_rounded,
-                    size: 15,
-                    color: Colors.white,
+              Material(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => Navigator.pop(context),
+                  child: const SizedBox(
+                    width: 38,
+                    height: 38,
+                    child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: Colors.white),
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              // Title
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
                       'Analisis & Laporan',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                        letterSpacing: -0.3,
-                      ),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -0.5),
                     ),
                     Text(
-                      'Data mingguan lalu lintas Medan',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: Colors.white.withOpacity(0.60),
-                        fontWeight: FontWeight.w600,
-                      ),
+                      'Wawasan Mobilitas Kota Medan',
+                      style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.6), fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
               ),
-              // Refresh icon
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded, color: Colors.white70, size: 20),
-                onPressed: _fetchAnalytics,
-              )
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, color: Colors.amberAccent, size: 14),
+                    SizedBox(width: 5),
+                    Text('AI', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
@@ -268,16 +265,16 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
     );
   }
 
-  // ── Body ─────────────────────────────────────────────────────
+  // ── Body Konten ───────────────────────────────────────────────────────
   Widget _buildBody() {
     if (_isLoading) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(color: _P.b600, strokeWidth: 2.5),
-            const SizedBox(height: 16),
-            Text("Sinkronisasi data...", style: TextStyle(color: _P.ink3, fontSize: 13, fontWeight: FontWeight.bold)),
+            const CircularProgressIndicator(color: _P.b600, strokeWidth: 3),
+            const SizedBox(height: 20),
+            Text("Menganalisis data...", style: TextStyle(color: _P.ink3, fontWeight: FontWeight.bold, fontSize: 13)),
           ],
         ),
       );
@@ -285,151 +282,115 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+      padding: const EdgeInsets.fromLTRB(20, 25, 20, 40),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _sectionLabel('Grafik Kemacetan Mingguan'),
+          _sectionLabel('Visualisasi Kepadatan Mingguan'),
           _buildChartCard(),
-          const SizedBox(height: 20),
-          _sectionLabel('Insight Mobilitas'),
+          const SizedBox(height: 30),
+          _sectionLabel('Insight Mobilitas Medan'),
           _buildInsightCard(
-            'Puncak Kemacetan',
-            'Terjadi setiap hari Jumat pukul 17:00 - 19:00 WIB.',
+            'Titik Puncak Macet',
+            'Jl. Sudirman & Simpang Pos terpantau macet total setiap sore.',
             Icons.trending_up_rounded,
             [const Color(0xFFFEF2F2), const Color(0xFFFECACA)],
             const Color(0xFFDC2626),
           ),
           _buildInsightCard(
-            'Rute Terpadat',
-            'Trayek KPUM 64 (Amplas - Pinang Baris).',
-            Icons.route_rounded,
+            'Efisiensi Armada',
+            'Angkot trayek 64 beroperasi 92% lebih efisien minggu ini.',
+            Icons.bolt_rounded,
             [_P.b50, _P.b100],
             _P.b600,
           ),
+          _buildInsightCard(
+            'Laporan Banjir',
+            'Tidak ada genangan air yang menghambat rute hari ini.',
+            Icons.check_circle_outline_rounded,
+            [const Color(0xFFF0FDF4), const Color(0xFFBBF7D0)],
+            const Color(0xFF16A34A),
+          ),
         ],
       ),
     );
   }
 
-  // ── Section Label ────────────────────────────────────────────
   Widget _sectionLabel(String label) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(left: 4, bottom: 12),
       child: Text(
         label.toUpperCase(),
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          color: _P.ink2,
-          letterSpacing: 0.5,
-        ),
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _P.ink2, letterSpacing: 1.1),
       ),
     );
   }
 
-  // ── Chart Card ───────────────────────────────────────────────
+  // ── Chart Card (FIXED OVERFLOW LOGIC) ──────────────────────────────────
   Widget _buildChartCard() {
     if (_chartData.isEmpty) {
       return Container(
-        height: 100,
+        height: 180,
         alignment: Alignment.center,
-        decoration: BoxDecoration(color: _P.card, borderRadius: BorderRadius.circular(20)),
-        child: Text("Data statistik belum tersedia", style: TextStyle(color: _P.ink4)),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+        child: Text("Data statistik tidak ditemukan.", style: TextStyle(color: _P.ink4)),
       );
     }
 
-    final maxVal = _chartData
-              .map((d) => (d['value'] as num).toDouble())
-              .reduce(math.max);
+    final maxVal = _chartData.map((d) => (d['value'] as num).toDouble()).reduce(math.max);
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: _P.card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _P.b100, width: 1.5),
+        borderRadius: BorderRadius.circular(28),
         boxShadow: [
-          BoxShadow(
-            color: _P.b500.withOpacity(0.07),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
+          BoxShadow(color: _P.b500.withOpacity(0.06), blurRadius: 20, offset: const Offset(0, 8)),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [_P.b500, _P.b700]),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-              const SizedBox(width: 6),
-              const Text(
-                'Indeks Kemacetan (%)',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  color: _P.ink3,
-                ),
-              ),
+              const Text("Indeks Kemacetan (%)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: _P.ink2)),
+              const Icon(Icons.more_horiz, color: _P.ink4),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 25),
+          // PERBAIKAN: Meningkatkan tinggi Box dari 180 ke 200 agar tidak overflow
           SizedBox(
-            height: 180,
+            height: 200, 
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: _chartData.map<Widget>((d) {
                 final val = (d['value'] as num).toDouble();
-                final barH = maxVal > 0 ? (val / maxVal) * 130.0 : 0.0;
-                final isHigh = val >= maxVal * 0.75;
+                // PERBAIKAN LOGIKA TINGGI: (val / maxVal) * 120 agar sisa ruang untuk teks cukup
+                final barH = (val / (maxVal > 0 ? maxVal : 1)) * 120.0;
+                final bool isHigh = val > 70;
 
                 return Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    Text(
-                      '${val.toInt()}%',
-                      style: TextStyle(
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w800,
-                        color: isHigh ? const Color(0xFFDC2626) : _P.b600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      width: 28,
-                      height: barH.clamp(8.0, 130.0),
+                    Text('${val.toInt()}%', 
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isHigh ? Colors.red : _P.b600)),
+                    const SizedBox(height: 6),
+                    AnimatedContainer(
+                      duration: const Duration(seconds: 1),
+                      width: 28, // Sedikit dipersempit untuk spasi visual
+                      height: barH.clamp(12, 140),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: isHigh
-                              ? [
-                                  const Color(0xFFFCA5A5),
-                                  const Color(0xFFDC2626),
-                                ]
-                              : [_P.b300, _P.b600],
+                          colors: isHigh ? [const Color(0xFFF87171), Colors.red] : [_P.b300, _P.b600],
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                         ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      d['day'],
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: _P.ink3,
-                      ),
-                    ),
+                    const SizedBox(height: 10),
+                    Text(d['day'], style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _P.ink2)),
                   ],
                 );
               }).toList(),
@@ -440,67 +401,38 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
     );
   }
 
-  // ── Insight Card ─────────────────────────────────────────────
-  Widget _buildInsightCard(
-    String title,
-    String desc,
-    IconData icon,
-    List<Color> iconBg,
-    Color iconColor,
-  ) {
+  // ── Insight Card ───────────────────────────────────────────────────────
+  Widget _buildInsightCard(String title, String desc, IconData icon, List<Color> bg, Color color) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 11),
-      padding: const EdgeInsets.all(15),
+      margin: const EdgeInsets.only(bottom: 15),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: _P.card,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _P.b100, width: 1.5),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _P.b100, width: 1),
         boxShadow: [
-          BoxShadow(
-            color: _P.b500.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
         ],
       ),
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 50,
+            height: 50,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: iconBg,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(15),
+              gradient: LinearGradient(colors: bg, begin: Alignment.topLeft, end: Alignment.bottomRight),
+              borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(icon, color: iconColor, size: 22),
+            child: Icon(icon, color: color, size: 24),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: _P.ink,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  desc,
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    color: _P.ink3,
-                    fontWeight: FontWeight.w600,
-                    height: 1.4,
-                  ),
-                ),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: _P.ink)),
+                const SizedBox(height: 4),
+                Text(desc, style: TextStyle(fontSize: 12, color: _P.ink3, height: 1.4)),
               ],
             ),
           ),
